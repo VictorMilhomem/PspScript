@@ -1,0 +1,121 @@
+Program        ::= TopDecl* EOF
+
+TopDecl        ::= GameConfig
+                 | AssetDecl
+                 | MessageDecl
+                 | StructDecl
+                 | ActorDecl
+                 | StateDecl
+                 | GlobalVarDecl
+                 | FuncDecl
+
+// Global EBOOT configuration and memory budget
+GameConfig     ::= "game" STRING "{" ConfigField* "}"
+ConfigField    ::= IDENT ":" (INT | SIZE_LITERAL | STRING) ","?
+// E.g.: ram_budget: 16MB, fps: 60
+
+// Assets processed at compile time
+AssetDecl      ::= "asset" IDENT "=" IDENT "(" STRING ("," ArgList)? ")"
+// E.g.: asset ship = texture("ship.png", format: RGBA4444)
+
+// Messages (compile to a global Tagged Union)
+MessageDecl    ::= "message" IDENT "{" FieldList? "}"
+
+// Passive data structures (values)
+StructDecl     ::= "struct" IDENT "{" FieldList? "}"
+
+// Actors with static capacity defined on the type (pool) or singleton (no brackets)
+ActorDecl      ::= "actor" IDENT ("[" INT "]")? "{" ActorMember* "}"
+ActorMember    ::= FieldDecl
+                 | LifecycleHook
+                 | MessageHandler
+                 | FuncDecl
+
+LifecycleHook  ::= ("init" | "update" | "draw" | "exit") "(" ParamList? ")" Block
+MessageHandler ::= "on" IDENT "(" IDENT ")" Block
+// E.g.: on Hit(msg) { ... }
+
+// Scenes / Game States (manage LevelArena reset)
+StateDecl      ::= "state" IDENT "{" StateMember* "}"
+StateMember    ::= FieldDecl | LifecycleHook | MessageHandler | FuncDecl
+
+Type           ::= PrimitiveType
+                 | GameType
+                 | ActorRefType
+                 | ArrayType
+                 | IDENT              // User-defined struct
+
+PrimitiveType  ::= "int" | "u8" | "u16" | "u32" | "f32" | "bool" | "void"
+GameType       ::= "vec2" | "vec3" | "rect" | "color" | "timer"
+ActorRefType   ::= "ref" "<" IDENT ">" // 32-bit generational handle
+ArrayType      ::= "[" INT "]" Type   // Fixed-size arrays only (no dynamic heap)
+
+GlobalVarDecl  ::= ("level" | "global")? "var" IDENT (":" Type)? ("=" Expr)?
+FieldDecl      ::= IDENT ":" Type ("=" Expr)?
+FieldList      ::= FieldDecl (("," | NEWLINE) FieldDecl)*
+
+LocalVarDecl   ::= "temp"? "var" IDENT (":" Type)? ("=" Expr)?
+// "temp var" allocates on FrameArena; normal "var" resides on the C stack
+
+Block          ::= "{" Stmt* "}"
+
+Stmt           ::= LocalVarDecl
+                 | AssignStmt
+                 | IfStmt
+                 | WhileStmt
+                 | ForEachStmt
+                 | ReturnStmt
+                 | SendStmt
+                 | SpawnStmt
+                 | DestroyStmt
+                 | TransitionStmt
+                 | ExprStmt
+
+// Message passing and actor lifecycle
+SendStmt       ::= "send" "(" Expr "," IDENT ("{" NamedArgList? "}")? ")"
+// E.g.: send(target, Hit { amount: 10, knockback: { -50.0, 0.0 } })
+
+SpawnStmt      ::= ("var" IDENT "=")? "spawn" IDENT ("{" NamedArgList? "}")?
+// E.g.: var e = spawn Enemy { pos: { 100.0, 20.0 } }
+
+DestroyStmt    ::= "destroy" Expr
+// E.g.: destroy self
+
+TransitionStmt ::= "goto" IDENT
+// E.g.: goto GameOver (triggers LevelArena reset)
+
+// Safe iteration over active actor pools
+ForEachStmt    ::= "each" IDENT "in" IDENT Block
+// E.g.: each b in Bullet { ... }
+
+IfStmt         ::= "if" Expr Block ("else" (IfStmt | Block))?
+WhileStmt      ::= "while" Expr Block
+ReturnStmt     ::= "return" Expr?
+AssignStmt     ::= Expr ("=" | "+=" | "-=" | "*=" | "/=") Expr
+ExprStmt       ::= Expr
+
+Expr           ::= LogicOr
+LogicOr        ::= LogicAnd ("||" LogicAnd)*
+LogicAnd       ::= Equality ("&&" Equality)*
+Equality       ::= Comparison (("==" | "!=") Comparison)*
+Comparison     ::= Term (("<" | "<=" | ">" | ">=") Term)*
+Term           ::= Factor (("+" | "-") Factor)*
+Factor         ::= Unary (("*" | "/" | "%") Unary)*
+Unary          ::= ("!" | "-") Unary | Postfix
+
+Postfix        ::= Primary ( CallSuffix | FieldSuffix | IndexSuffix )*
+CallSuffix     ::= "(" ArgList? ")"
+FieldSuffix    ::= "." IDENT
+IndexSuffix    ::= "[" Expr "]"
+
+Primary        ::= INT
+                 | FLOAT              // Automatically emits 'f' suffix in C
+                 | TIME_LITERAL       // E.g.: 1.5s -> 1.5f, 500ms -> 0.5f
+                 | COLOR_LITERAL      // E.g.: #FF00AA -> 0xFFAA00FF (ABGR)
+                 | STRING
+                 | "true" | "false" | "null" | "self"
+                 | VecLiteral         // E.g.: { 10.0, 20.0 }
+                 | IDENT
+                 | "(" Expr ")"
+
+VecLiteral     ::= "{" Expr "," Expr ("," Expr)? "}"
