@@ -1,58 +1,151 @@
-# PSPScript
+# PSPScript (v0.1)
 
-A C# transpiler for PSPScript, a domain-specific scripting language engineered for PlayStation Portable (PSP) homebrew game development. It compiles high-level, game-oriented scripts down to clean, static C99 targeting the PSPSDK (`psp-gcc`) and SDL2/pspgu.
+A C# (.NET 10) transpiler for **PSPScript (`.psps`)**, a domain-specific game scripting language engineered for **Sony PlayStation Portable (PSP)** homebrew development. It compiles high-level, game-oriented scripts down to clean, static, zero-heap-allocation **C99** targeting **PSPSDK (`psp-gcc` + `psp-prxgen`)** and a modular STB-style **SDL2** runtime (`EBOOT.PBP` for PSP/PPSSPP, plus native Linux desktop previews).
 
-## Core Idea
+---
 
-The PlayStation Portable operates under strict hardware constraints: an Allegrex MIPS CPU clocked up to 333 MHz, 32 MB of unified RAM (64 MB on PSP-2000+), and no virtual memory. On such hardware, frequent dynamic heap allocations (`malloc`/`free`) inevitably lead to memory fragmentation and crashes.
+## Core Design
 
-PSPScript resolves this by enforcing static resource budgets at compile time:
+The PlayStation Portable runs on a 32-bit Allegrex MIPS CPU (333 MHz), a hardware single-precision FPU, a `480×272` screen, 32 MB/64 MB of unified RAM, and no virtual memory. Frequent `malloc`/`free` calls lead to memory fragmentation and crashes on real hardware.
 
-- **Static Memory Arenas**: Memory is managed via global, level, and frame arenas, eliminating runtime heap allocations and fragmentation.
-- **Static Actor Model**: Actors reside in fixed-capacity pools and are referenced through 32-bit generational handles (`ref<T>`) to guarantee memory safety without garbage collection overhead.
-- **Message Passing**: Actor communication uses typed messages that compile into static mailboxes and flat tagged unions.
-- **Game Primitives & Asset Baking**: First-class primitives (`vec2`, `color`, `timer`) and compile-time asset conversion directly into PSP hardware-friendly formats (e.g., swizzled textures).
+PSPScript enforces static resource budgets at compile time:
 
-### Syntax Preview
+- **Static Memory Arenas**: Memory is explicitly scoped across `global var` (`.bss`), `level var` (`LevelArena`, automatically reset on `goto`), `var` (C stack), and `temp var` (`FrameArena`, wiped every frame).
+- **Static Actor Pools & Generational Handles**: Actors are declared either as singletons (`actor Player`) or fixed-capacity pools (`actor Ball[4]`) and referenced via 32-bit generational handles (`ref<T>`) to prevent dangling-pointer crashes without garbage collection.
+- **Typed Message Passing**: Actor communication uses `message`, `send(...)`, and `on Msg(msg)` handlers lowered to a static tagged union and fixed-capacity frame mailbox.
+- **Game Primitives & Hardware Math**: First-class `vec2`, `vec3`, `rect` (16-byte aligned for VFPU), compile-time ABGR8888 `color` (`#RRGGBB` / `#RRGGBBAA`), and auto-ticking `timer` (`0.5s`, `750ms`) with single-precision `f` suffixes on all floats.
 
-```rust
-message Hit {
-    amount: int
+---
+
+## Syntax Preview
+
+```pspscript
+game "PSP Pong" {
+    ram_budget: 16MB,
+    fps: 60
 }
 
-actor Player {
-    pos: vec2
-    target: ref<Enemy>
-    shoot_cooldown: timer
+message PaddleBounce {
+    dir_x: f32,
+    offset_y: f32
+}
+
+level var player_score: int = 0
+
+actor Ball[4] {
+    pos: vec2 = { 236.0, 132.0 }
+    vel: vec2 = { -180.0, 90.0 }
+    serve_delay: timer = 0.75s
+
+    on PaddleBounce(msg) {
+        vel.x = clamp(abs(vel.x) * 1.06, 180.0, 340.0) * msg.dir_x
+    }
 
     update(dt: f32) {
-        if shoot_cooldown.elapsed() {
-            send(target, Hit { amount: 25 })
-            shoot_cooldown = 0.5s
+        if !serve_delay.elapsed() {
+            return
         }
+        pos += vel * dt
+    }
+
+    draw() {
+        draw_rect({ pos.x, pos.y, 8.0, 8.0 }, #FFF275)
     }
 }
-
-actor Enemy[32] {
-    pos: vec2
-    hp: int = 100
-
-    on Hit(msg) {
-        hp -= msg.amount
-        if hp <= 0 {
-            destroy self
-        }
-    }
-}
-
 ```
+
+See the full playable game in [examples/pong.psps](examples/pong.psps).
+
+---
+
+## Quick Start
+
+### Prerequisites
+- **.NET 10 SDK** (to run the PSPScript compiler)
+- **Podman** (`podman-compose` or `podman compose`) or **Docker** (to cross-compile `build/EBOOT.PBP` via `pspdev/pspdev:latest`)
+- Optional: **`gcc` + `SDL2`** on Linux for instant native desktop previews
+
+### Build & Run
+
+```bash
+# 1. Full pipeline: parse, type-check, emit build/out.c, and package build/EBOOT.PBP
+dotnet run -- examples/pong.psps
+
+# 2. Fast local desktop preview on Linux (generates build/out.c and compiles build/game_desktop)
+dotnet run -- examples/pong.psps --c-only --desktop && ./build/game_desktop
+
+# 3. Validate syntax, types, and static RAM budget without emitting C code
+dotnet run -- examples/pong.psps --check --dump-ast
+```
+
+### CLI Options
+
+| Flag | Description |
+| :--- | :--- |
+| `<input.psps>` | Path to the PSPScript source file |
+| `-o, --output <path>` | Output C99 path (default: `build/out.c`) |
+| `--c-only, --no-eboot` | Emit C99 only; skip container `EBOOT.PBP` build |
+| `--desktop` | Also build native Linux preview binary (`make desktop`) |
+| `--check` | Run parser and semantic analyzer only |
+| `--dump-ast` | Print parsed declarations and resolved semantic types |
+
+---
+
+## VS Code Extension
+
+Install the bundled `.psps` syntax highlighter, file icon, and snippets extension from [vscode-pspscript/](vscode-pspscript/README.md):
+
+```bash
+mkdir -p ~/.vscode/extensions && ln -sfn "$(pwd)/vscode-pspscript" ~/.vscode/extensions/pspscript-0.1.0
+```
+
+Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highlighting for `.psps` files.
+
+---
+
+## Project Structure
+
+| Path | Description |
+| :--- | :--- |
+| `Ast/` | Immutable C# record AST definitions (`ProgramNode`, `TopDecl`, `Stmt`, `Expr`, `TypeRef`) |
+| `Parser/` | Parlot-based recursive-descent & precedence-climbing parser (`PspParser.cs`) |
+| `Semantics/` | Two-pass semantic analyzer, symbol table, type checker, and static RAM budget validator |
+| `CodeGen/` | Modular C99 code generator (`CSourceWriter`, `CTypeMapper`, `Actors`, `States`, `Statements`, `Expressions`) |
+| `Runtime/` | Zero-heap STB-style C99 headers (`psps_runtime.h`, `psps_types.h`, `psps_arena.h`, `psps_video.h`, `psps_input.h`) |
+| `examples/` | Sample `.psps` games ([examples/pong.psps](examples/pong.psps)) |
+| `docs/` | [Language Tutorial](docs/tutorial.md) & [EBNF Grammar](docs/grammar.md) |
+| `vscode-pspscript/` | VS Code syntax highlighting extension & snippets |
+| `Makefile` & `docker-compose.yml` | Podman/PSPSDK cross-compilation (`psp-gcc` → `psp-prxgen` → `EBOOT.PBP`) and desktop preview targets |
+
+---
+
+## Documentation
+
+- **[Language Tutorial](docs/tutorial.md)** — Complete guide to PSPScript syntax, memory scopes, actors, messages, states, timers, and runtime functions.
+- **[Grammar Reference](docs/grammar.md)** — Formal EBNF grammar specification.
+
+---
 
 ## Roadmap
 
+### v0.1 (Current Release)
 * [x] AST (Abstract Syntax Tree) Design
-* [ ] Parser (using Parlot)
-* [ ] Semantic Analysis & Type Checking
-* [ ] C99 Code Generator (Arenas, Actor Pools & Message Mailboxes)
-* [ ] Minimal PSP C Runtime
-* [ ] CLI / PSPSDK Build Integration (`EBOOT.PBP`)
+* [x] Parser (using Parlot 2.3)
+* [x] Two-Pass Semantic Analysis, Type Checking & Static RAM Budget Validation
+* [x] Modular C99 Code Generator (Static Arenas, Actor Pools, Generational Handles & Frame Mailbox)
+* [x] Modular STB-Style PSP C99 Runtime (`psps_arena`, `psps_types`, `psps_video`, `psps_input`)
+* [x] CLI Compiler & Podman/PSPSDK `EBOOT.PBP` Build Integration (`psp-prxgen` + `pack-pbp`)
+* [x] VS Code Syntax Highlighting Extension & Snippets
+* [x] Language Tutorial & Playable Pong Example (`examples/pong.psps`)
 
+### Planned for v0.2+
+* [ ] Compile-Time Image & Audio Asset Baker (PNG → swizzled `RGBA4444`/`T8`, WAV → PCM)
+* [ ] PSP Audio Runtime Module (`psps_audio.h`)
+* [ ] Language Server (LSP) for Real-Time VS Code Diagnostics & Autocomplete
+* [ ] Automated Unit & Integration Test Suite
+
+---
+
+## License
+
+This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.
