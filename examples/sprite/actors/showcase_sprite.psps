@@ -1,0 +1,73 @@
+import "../shared/assets"
+
+actor ChickenHouse {
+    pos: vec2 = { 216.0, 112.0 }
+    speed: f32 = 140.0
+    tint: color = #FFFFFF
+
+    on CycleTint(msg) {
+        active_tint_index += msg.step
+        if active_tint_index > 3 {
+            active_tint_index = 0
+        }
+
+        if active_tint_index == 0 {
+            tint = #FFFFFF
+        } else if active_tint_index == 1 {
+            tint = #00E5FF
+        } else if active_tint_index == 2 {
+            tint = #FFF275
+        } else {
+            tint = #FF6B9D
+        }
+    }
+
+    update(dt: f32) {
+        temp var dir: vec2 = { 0.0, 0.0 }
+
+        if button_held(BTN_LEFT) {
+            dir.x -= 1.0
+        }
+        if button_held(BTN_RIGHT) {
+            dir.x += 1.0
+        }
+        if button_held(BTN_UP) {
+            dir.y -= 1.0
+        }
+        if button_held(BTN_DOWN) {
+            dir.y += 1.0
+        }
+
+        if dir.length() > 0.0 {
+            pos += dir.normalized() * speed * dt
+        }
+
+        pos.x = clamp(pos.x, 16.0, 416.0)
+        pos.y = clamp(pos.y, 40.0, 196.0)
+    }
+
+    draw() {
+        set_camera_enabled(true)
+        sprite(house_tex, pos, tint)
+    }
+}
+
+actor Egg[8] {
+    pos: vec2
+    bob_phase: f32 = 0.0
+    base_y: f32 = 120.0
+
+    init() {
+        base_y = pos.y
+    }
+
+    update(dt: f32) {
+        bob_phase += dt * 4.0
+        pos.y = base_y + sin(bob_phase) * 4.0
+    }
+
+    draw() {
+        set_camera_enabled(true)
+        sprite(egg_tex, pos, #FFFFFF)
+    }
+}

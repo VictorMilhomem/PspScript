@@ -1,0 +1,20 @@
+// Compile-time baked spritesheets from examples/assets/Characters/
+
+// 192x192 sheet: 4 columns x 4 rows of 48x48 frames (Row 0=Down, 1=Up, 2=Left, 3=Right)
+asset hero_sheet = texture("../assets/Characters/Basic Charakter Spritesheet.png", format: ABGR8888)
+
+// 64x32 sheet: 4 columns x 2 rows of 16x16 frames (Row 0=Idle, Row 1=Walk)
+asset chicken_sheet = texture("../assets/Characters/Free Chicken Sprites.png", format: ABGR8888)
+
+message Startle {
+    from_pos: vec2
+}
+
+// Input bitmasks matching Runtime/psps_input.h
+global var BTN_CROSS: int = 1
+global var BTN_UP: int = 16
+global var BTN_DOWN: int = 32
+global var BTN_LEFT: int = 64
+global var BTN_RIGHT: int = 128
+
+level var startle_count: int = 0

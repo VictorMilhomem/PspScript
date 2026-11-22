@@ -1,0 +1,52 @@
+import "../shared/assets"
+import "../actors/hero"
+import "../actors/chicken"
+
+state Meadow {
+    init() {
+        spawn Chicken { pos: { 140.0, 100.0 }, seed: 1 }
+        spawn Chicken { pos: { 310.0, 140.0 }, seed: 2 }
+        spawn Chicken { pos: { 220.0, 210.0 }, seed: 3 }
+        spawn Chicken { pos: { 420.0, 120.0 }, seed: 4 }
+        spawn Chicken { pos: { 360.0, 260.0 }, seed: 5 }
+        spawn Chicken { pos: { 180.0, 280.0 }, seed: 6 }
+    }
+
+    update(dt: f32) {
+        // Smooth 2D camera centered on Hero within the 660x420 meadow
+        var cam_x: f32 = clamp(Hero.pos.x - 216.0, 0.0, 200.0)
+        var cam_y: f32 = clamp(Hero.pos.y - 112.0, 0.0, 160.0)
+        set_camera({ cam_x, cam_y })
+
+        // Broadcast Startle message to nearby chickens when pressing X
+        if button_pressed(BTN_CROSS) {
+            each c in Chicken {
+                send(c, Startle { from_pos: Hero.pos })
+            }
+        }
+    }
+
+    draw() {
+        clear_screen(#3B6E3A)
+
+        // World-space meadow fence border (follows camera)
+        set_camera_enabled(true)
+        draw_rect({ 20.0, 36.0, 640.0, 4.0 }, #8C5A32)
+        draw_rect({ 20.0, 404.0, 640.0, 4.0 }, #8C5A32)
+        draw_rect({ 20.0, 36.0, 4.0, 372.0 }, #8C5A32)
+        draw_rect({ 656.0, 36.0, 4.0, 372.0 }, #8C5A32)
+
+        // Screen-space HUD (ignores camera)
+        set_camera_enabled(false)
+        draw_rect({ 0.0, 0.0, 480.0, 24.0 }, #142614)
+        draw_text("ANIM DEMO  D-PAD: WALK  X: STARTLE", { 10.0, 8.0 }, #FFF275, 1)
+        draw_text("STARTLES:", { 356.0, 8.0 }, #FFFFFF, 1)
+        draw_number(startle_count, { 436.0, 8.0 }, #00E5FF, 1)
+    }
+
+    exit() {
+        each c in Chicken {
+            destroy c
+        }
+    }
+}

@@ -1,0 +1,13 @@
+// ============================================================================
+// PSP Sprite Demo - Static PNG Asset Baking, Sprites, Tints & 2D Camera
+// ============================================================================
+
+game "PSP Sprite Demo" {
+    ram_budget: 16MB,
+    fps: 60,
+    entry: Gallery
+}
+
+import "shared/assets.psps"
+import "actors/showcase_sprite.psps"
+import "states/gallery.psps"

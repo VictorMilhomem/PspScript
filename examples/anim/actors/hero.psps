@@ -1,0 +1,54 @@
+import "../shared/assets"
+
+actor Hero {
+    pos: vec2 = { 216.0, 112.0 }
+    speed: f32 = 115.0
+    dir_row: int = 0       // 0 = Down, 1 = Up, 2 = Left, 3 = Right
+    frame: int = 0         // 0..3 within current direction row
+    anim_timer: timer = 140ms
+
+    update(dt: f32) {
+        temp var move: vec2 = { 0.0, 0.0 }
+
+        if button_held(BTN_DOWN) {
+            move.y += 1.0
+            dir_row = 0
+        }
+        if button_held(BTN_UP) {
+            move.y -= 1.0
+            dir_row = 1
+        }
+        if button_held(BTN_LEFT) {
+            move.x -= 1.0
+            dir_row = 2
+        }
+        if button_held(BTN_RIGHT) {
+            move.x += 1.0
+            dir_row = 3
+        }
+
+        if move.length() > 0.0 {
+            pos += move.normalized() * speed * dt
+            if anim_timer.elapsed() {
+                frame += 1
+                if frame >= 4 {
+                    frame = 0
+                }
+                anim_timer = 140ms
+            }
+        } else {
+            // Reset to standing idle frame when stopped
+            frame = 0
+        }
+
+        pos.x = clamp(pos.x, 24.0, 620.0)
+        pos.y = clamp(pos.y, 40.0, 380.0)
+    }
+
+    draw() {
+        set_camera_enabled(true)
+        var src_x: f32 = frame * 48
+        var src_y: f32 = dir_row * 48
+        draw_subsprite(hero_sheet, { src_x, src_y, 48.0, 48.0 }, pos)
+    }
+}

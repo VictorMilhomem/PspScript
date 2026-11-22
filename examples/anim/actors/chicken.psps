@@ -1,0 +1,72 @@
+import "../shared/assets"
+
+actor Chicken[6] {
+    pos: vec2 = { 120.0, 120.0 }
+    vel: vec2 = { 0.0, 0.0 }
+    walking: bool = false
+    frame: int = 0
+    anim_timer: timer = 180ms
+    ai_timer: timer = 1.2s
+    seed: int = 0
+
+    on Startle(msg) {
+        temp var away: vec2 = pos - msg.from_pos
+        if away.length() < 120.0 {
+            if away.length() > 0.1 {
+                vel = away.normalized() * 95.0
+            } else {
+                vel = { 95.0, 0.0 }
+            }
+            walking = true
+            ai_timer = 900ms
+            startle_count += 1
+        }
+    }
+
+    update(dt: f32) {
+        if ai_timer.elapsed() {
+            seed += 1
+            if walking {
+                walking = false
+                vel = { 0.0, 0.0 }
+                ai_timer = 1.4s
+            } else {
+                walking = true
+                var angle: f32 = seed * 1.7
+                vel = { cos(angle) * 38.0, sin(angle) * 38.0 }
+                ai_timer = 1.1s
+            }
+        }
+
+        if walking {
+            pos += vel * dt
+            pos.x = clamp(pos.x, 32.0, 620.0)
+            pos.y = clamp(pos.y, 48.0, 380.0)
+        }
+
+        if anim_timer.elapsed() {
+            frame += 1
+            if walking {
+                if frame >= 4 {
+                    frame = 0
+                }
+            } else {
+                if frame >= 2 {
+                    frame = 0
+                }
+            }
+            anim_timer = 180ms
+        }
+    }
+
+    draw() {
+        set_camera_enabled(true)
+        var row: int = 0
+        if walking {
+            row = 1
+        }
+        var src_x: f32 = frame * 16
+        var src_y: f32 = row * 16
+        draw_subsprite(chicken_sheet, { src_x, src_y, 16.0, 16.0 }, pos)
+    }
+}

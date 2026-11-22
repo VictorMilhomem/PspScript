@@ -1,0 +1,14 @@
+// ============================================================================
+// PSP Animation Demo - Spritesheet Frame Clocks, Pooled Actors & 2D Camera
+// ============================================================================
+
+game "PSP Animation Demo" {
+    ram_budget: 16MB,
+    fps: 60,
+    entry: Meadow
+}
+
+import "shared/assets.psps"
+import "actors/hero.psps"
+import "actors/chicken.psps"
+import "states/meadow.psps"
