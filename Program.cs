@@ -144,7 +144,8 @@ if (checkOnly)
 // ============================================================================
 Console.WriteLine($"[3/4] Generating C99 code -> '{outputPath}'...");
 
-string cSource = CCodeGenerator.Generate(program, model);
+string? inputDir = Path.GetDirectoryName(Path.GetFullPath(inputPath));
+string cSource = CCodeGenerator.Generate(program, model, inputDir);
 string? outDir = Path.GetDirectoryName(outputPath);
 if (!string.IsNullOrEmpty(outDir))
 {

@@ -8,19 +8,22 @@ public sealed partial class CCodeGenerator
     private readonly ProgramNode _program;
     private readonly SemanticModel _model;
     private readonly SymbolTable _symbols;
+    private readonly string? _sourceBaseDir;
+    private readonly Dictionary<string, BakedTextureAsset> _bakedAssets = new(StringComparer.Ordinal);
     private readonly CSourceWriter _writer = new();
     private int _loopCounter;
 
-    public CCodeGenerator(ProgramNode program, SemanticModel model)
+    public CCodeGenerator(ProgramNode program, SemanticModel model, string? sourceBaseDir = null)
     {
         _program = program;
         _model = model;
         _symbols = model.Symbols;
+        _sourceBaseDir = sourceBaseDir;
     }
 
-    public static string Generate(ProgramNode program, SemanticModel model)
+    public static string Generate(ProgramNode program, SemanticModel model, string? sourceBaseDir = null)
     {
-        var generator = new CCodeGenerator(program, model);
+        var generator = new CCodeGenerator(program, model, sourceBaseDir);
         return generator.EmitProgram();
     }
 
@@ -162,17 +165,29 @@ public sealed partial class CCodeGenerator
 
         foreach (var asset in _symbols.Assets.Values)
         {
-            _writer.WriteLine($"/* Asset '{asset.Name}' ({asset.AssetKind}: \"{asset.FilePath}\") */");
+            var baked = AssetBaker.BakeTexture(asset, _sourceBaseDir);
+            _bakedAssets[asset.Name] = baked;
+
+            string elemType = baked.Format == BakedPixelFormat.Abgr8888 ? "uint32_t" : "uint16_t";
+            string hexFmt = baked.Format == BakedPixelFormat.Abgr8888 ? "X8" : "X4";
+
+            _writer.WriteLine($"/* Baked Asset '{asset.Name}' ({asset.AssetKind}: \"{asset.FilePath}\", {baked.Width}x{baked.Height}, {baked.Format}) */");
             _writer.WriteLine($"static psps_texture_t g_asset_{asset.Name};");
-            _writer.OpenBlock($"static const uint16_t g_asset_{asset.Name}_pixels[64] =");
-            _writer.WriteLine("0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu,");
-            _writer.WriteLine("0xFFFFu, 0xF8FFu, 0xF8FFu, 0xFFFFu, 0xFFFFu, 0xF8FFu, 0xF8FFu, 0xFFFFu,");
-            _writer.WriteLine("0xFFFFu, 0xF8FFu, 0xF8FFu, 0xFFFFu, 0xFFFFu, 0xF8FFu, 0xF8FFu, 0xFFFFu,");
-            _writer.WriteLine("0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu,");
-            _writer.WriteLine("0xFFFFu, 0xFF8Fu, 0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFF8Fu, 0xFFFFu,");
-            _writer.WriteLine("0xFFFFu, 0xFFFFu, 0xFF8Fu, 0xFF8Fu, 0xFF8Fu, 0xFF8Fu, 0xFFFFu, 0xFFFFu,");
-            _writer.WriteLine("0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu,");
-            _writer.WriteLine("0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu, 0xFFFFu");
+            _writer.OpenBlock($"static const {elemType} g_asset_{asset.Name}_pixels[{baked.Pixels.Length}] =");
+
+            const int perLine = 12;
+            for (int i = 0; i < baked.Pixels.Length; i += perLine)
+            {
+                int count = Math.Min(perLine, baked.Pixels.Length - i);
+                var row = new string[count];
+                for (int j = 0; j < count; j++)
+                {
+                    row[j] = $"0x{baked.Pixels[i + j].ToString(hexFmt)}u";
+                }
+                string suffix = (i + count < baked.Pixels.Length) ? "," : string.Empty;
+                _writer.WriteLine(string.Join(", ", row) + suffix);
+            }
+
             _writer.CloseBlock(";");
             _writer.WriteLine();
         }

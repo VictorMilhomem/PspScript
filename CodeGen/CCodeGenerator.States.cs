@@ -249,7 +249,17 @@ public sealed partial class CCodeGenerator
             _writer.WriteLine("/* Upload Compile-Time Baked Assets to VRAM */");
             foreach (var asset in _symbols.Assets.Values)
             {
-                _writer.WriteLine($"g_asset_{asset.Name} = psps_load_texture_rgba4444(g_asset_{asset.Name}_pixels, 8u, 8u);");
+                if (_bakedAssets.TryGetValue(asset.Name, out var baked))
+                {
+                    string loader = baked.Format == BakedPixelFormat.Abgr8888
+                        ? "psps_load_texture_abgr8888"
+                        : "psps_load_texture_rgba4444";
+                    _writer.WriteLine($"g_asset_{asset.Name} = {loader}(g_asset_{asset.Name}_pixels, {baked.Width}u, {baked.Height}u);");
+                }
+                else
+                {
+                    _writer.WriteLine($"g_asset_{asset.Name} = psps_load_texture_rgba4444(g_asset_{asset.Name}_pixels, 8u, 8u);");
+                }
             }
             _writer.WriteLine();
         }
