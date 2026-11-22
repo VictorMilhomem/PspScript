@@ -1,0 +1,18 @@
+services:
+  psp-builder:
+    image: docker.io/pspdev/pspdev:latest
+    container_name: pspscript-builder
+    working_dir: /src
+    environment:
+      PSP_EBOOT_TITLE: ${PSP_EBOOT_TITLE:-PSPScript Game}
+    volumes:
+      - ./:/src:Z
+    command: >
+      sh -c '
+        PSPDEV_DIR="$$(psp-config --pspdev-path)"
+        if [ ! -f "$${PSPDEV_DIR}/psp/include/SDL2/SDL.h" ]; then
+          echo "Installing PSP SDL2 via psp-pacman..."
+          psp-pacman -Sy --noconfirm sdl2
+        fi
+        make -C /src && chmod -R a+rwX /src/build
+      '
