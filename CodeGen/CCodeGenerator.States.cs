@@ -266,11 +266,11 @@ public sealed partial class CCodeGenerator
         }
         _writer.WriteLine();
 
-        var firstState = _symbols.States.Values.FirstOrDefault();
-        if (firstState is not null)
+        string? entryStateName = _symbols.EntryStateName ?? _symbols.States.Values.FirstOrDefault()?.Name;
+        if (!string.IsNullOrEmpty(entryStateName))
         {
-            _writer.WriteLine($"/* Enter Initial Game State: '{firstState.Name}' */");
-            _writer.WriteLine($"psps_request_state_transition(STATE_{firstState.Name});");
+            _writer.WriteLine($"/* Enter Configured Entry Game State: '{entryStateName}' */");
+            _writer.WriteLine($"psps_request_state_transition(STATE_{entryStateName});");
             _writer.WriteLine("psps_apply_state_transition();");
             _writer.WriteLine();
         }

@@ -16,8 +16,8 @@ ImportDecl     ::= "import" STRING
 
 // Global EBOOT configuration and memory budget
 GameConfig     ::= "game" STRING "{" ConfigField* "}"
-ConfigField    ::= IDENT ":" (INT | SIZE_LITERAL | STRING) ","?
-// E.g.: ram_budget: 16MB, fps: 60
+ConfigField    ::= IDENT ":" (INT | SIZE_LITERAL | STRING | IDENT) ","?
+// E.g.: ram_budget: 16MB, fps: 60, entry: Match
 
 // Assets processed at compile time
 AssetDecl      ::= "asset" IDENT "=" IDENT "(" STRING ("," ArgList)? ")"

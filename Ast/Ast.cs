@@ -22,6 +22,7 @@ public abstract record ConfigValue;
 public record IntConfigValue(int Value): ConfigValue;
 public record SizeConfigValue(long Bytes): ConfigValue; // Normalized from KB/MB
 public record StringConfigValue(string Value): ConfigValue;
+public record IdentConfigValue(string Name): ConfigValue;
 
 public record AssetDecl(
     string Name,

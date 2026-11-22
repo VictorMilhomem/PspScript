@@ -81,12 +81,14 @@ Every `.psps` program can declare a `game` block to configure the PSP `EBOOT.PBP
 ```pspscript
 game "StarDust PSP" {
     ram_budget: 16MB,
-    fps: 60
+    fps: 60,
+    entry: Gameplay
 }
 ```
 
 - **Title**: Stamped automatically into `PARAM.SFO` when building `EBOOT.PBP` and used as the desktop window title.
 - **`ram_budget`**: Accepts size literals (`KB` or `MB`, e.g., `512KB`, `16MB`). During semantic analysis, the compiler sums the static byte size of all globals, state fields, fixed arrays, and actor pools and fails compilation if the budget is exceeded.
+- **`entry`**: Explicitly specifies the starting `state` entered at boot (accepts either an identifier like `entry: Gameplay` or a quoted string `entry: "Gameplay"`). Validated at compile time so typos fail before code generation; if omitted, the first declared `state` is used.
 
 ---
 

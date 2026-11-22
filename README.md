@@ -22,7 +22,8 @@ PSPScript enforces static resource budgets at compile time:
 ```pspscript
 game "PSP Pong" {
     ram_budget: 16MB,
-    fps: 60
+    fps: 60,
+    entry: Match
 }
 
 message PaddleBounce {

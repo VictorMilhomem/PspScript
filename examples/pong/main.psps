@@ -4,7 +4,8 @@
 
 game "PSP Pong" {
     ram_budget: 16MB,
-    fps: 60
+    fps: 60,
+    entry: Match
 }
 
 import "shared/constants.psps"

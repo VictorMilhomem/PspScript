@@ -149,6 +149,7 @@ public sealed class SymbolTable
 
     public GameConfigDecl? GameConfig { get; set; }
     public long? ConfiguredRamBudgetBytes { get; set; }
+    public string? EntryStateName { get; set; }
 
     public Dictionary<string, AssetSymbol> Assets { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, MessageSymbol> Messages { get; } = new(StringComparer.Ordinal);

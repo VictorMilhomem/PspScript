@@ -24,6 +24,7 @@ public sealed class SemanticAnalyzer
     {
         // Pass 1: Collect all top-level symbols & resolve signatures
         CollectTopLevelDeclarations(program);
+        ResolveGameEntryState();
         ResolveTopLevelSignatures(program);
         CheckStructCycles();
 
@@ -174,6 +175,44 @@ public sealed class SemanticAnalyzer
                     break;
             }
         }
+    }
+
+    private void ResolveGameEntryState()
+    {
+        if (_symbols.GameConfig is not null &&
+            _symbols.GameConfig.Settings.TryGetValue("entry", out var entrySetting))
+        {
+            string? entryName = entrySetting switch
+            {
+                IdentConfigValue identVal => identVal.Name,
+                StringConfigValue strVal => strVal.Value,
+                _ => null
+            };
+
+            if (string.IsNullOrWhiteSpace(entryName))
+            {
+                ReportError(
+                    "'entry' in game config must be a state name (e.g., entry: Match or entry: \"Match\").",
+                    _symbols.GameConfig.Span
+                );
+                return;
+            }
+
+            if (!_symbols.States.ContainsKey(entryName))
+            {
+                ReportError(
+                    $"Game config 'entry' references undeclared state '{entryName}'.",
+                    _symbols.GameConfig.Span
+                );
+                return;
+            }
+
+            _symbols.EntryStateName = entryName;
+            return;
+        }
+
+        // Default to the first declared state if 'entry' is omitted
+        _symbols.EntryStateName = _symbols.States.Values.FirstOrDefault()?.Name;
     }
 
     private bool RegisterUniqueTopLevel(string name, TopDecl decl)

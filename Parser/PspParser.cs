@@ -470,7 +470,8 @@ public static class PspParser
 
         var configValue = OneOf(
             stringLiteral.Then<ConfigValue>(static (context, s) => new StringConfigValue(s)),
-            sizeOrIntConfig
+            sizeOrIntConfig,
+            rawIdentifier.Then<ConfigValue>(static (context, id) => new IdentConfigValue(id))
         );
 
         var configEntry = rawIdentifier
