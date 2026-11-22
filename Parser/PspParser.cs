@@ -3,7 +3,6 @@ using Parlot;
 using Parlot.Fluent;
 using PspScript.Ast;
 using static Parlot.Fluent.Parsers;
-using Parlot.SourceGenerator;
 
 namespace PspScript.Parsing;
 
@@ -41,7 +40,6 @@ public static class PspParser
         Terms.Keyword(word, IdentifierPartChars)
             .Then(static (context, span) => span.ToString());
 
-    [GenerateParser(nameof(TryParse), Diagnostics = true)]
     private static Parser<ProgramNode> BuildProgramParser()
     {
         // ====================================================================
