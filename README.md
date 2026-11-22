@@ -111,7 +111,7 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 | `Parser/` | Parlot-based recursive-descent & precedence-climbing parser (`PspParser.cs`) |
 | `Semantics/` | Two-pass semantic analyzer, symbol table, type checker, and static RAM budget validator |
 | `CodeGen/` | Modular C99 code generator (`CSourceWriter`, `CTypeMapper`, `Actors`, `States`, `Statements`, `Expressions`) |
-| `Runtime/` | Zero-heap STB-style C99 headers (`psps_runtime.h`, `psps_types.h`, `psps_arena.h`, `psps_video.h`, `psps_input.h`) |
+| `Runtime/` | Zero-heap STB-style C99 headers (`psps_runtime.h`, `psps_types.h`, `psps_arena.h`, `psps_video.h`, `psps_input.h`, `psps_save.h`) |
 | `examples/` | Sample `.psps` games ([examples/pong.psps](examples/pong.psps)) |
 | `docs/` | [Language Tutorial](docs/tutorial.md) & [EBNF Grammar](docs/grammar.md) |
 | `vscode-pspscript/` | VS Code syntax highlighting extension & snippets |
@@ -133,7 +133,8 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 * [x] Parser (using Parlot 2.3)
 * [x] Two-Pass Semantic Analysis, Type Checking & Static RAM Budget Validation
 * [x] Modular C99 Code Generator (Static Arenas, Actor Pools, Generational Handles & Frame Mailbox)
-* [x] Modular STB-Style PSP C99 Runtime (`psps_arena`, `psps_types`, `psps_video`, `psps_input`)
+* [x] Modular STB-Style PSP C99 Runtime (`psps_arena`, `psps_types`, `psps_video`, `psps_input`, `psps_save`)
+* [x] Tilemaps, 2D Camera (`set_camera`, `draw_subsprite`, `draw_tilemap`), Embedded 8×8 Bitmap Font (`draw_text`, `draw_number`), and Save Data Persistence (`save_game` / `load_game` via `sceUtilitySavedata`)
 * [x] CLI Compiler & Podman/PSPSDK `EBOOT.PBP` Build Integration (`psp-prxgen` + `pack-pbp`)
 * [x] VS Code Syntax Highlighting Extension & Snippets
 * [x] Language Tutorial & Playable Pong Example (`examples/pong.psps`)

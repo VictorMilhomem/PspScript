@@ -17,8 +17,9 @@ Welcome to **PSPScript** — a domain-specific game scripting language designed 
 9. [Game States & Transitions (`state`, `goto`)](#9-game-states--transitions-state-goto)
 10. [Control Flow & Functions](#10-control-flow--functions)
 11. [Built-In PSP Runtime Functions & Input](#11-built-in-psp-runtime-functions--input)
-12. [The Deterministic 4-Phase Frame Loop](#12-the-deterministic-4-phase-frame-loop)
-13. [Complete Playable Example](#13-complete-playable-example)
+12. [2D Camera, Tilemaps, Bitmap Fonts & Save Data](#12-2d-camera-tilemaps-bitmap-fonts--save-data)
+13. [The Deterministic 4-Phase Frame Loop](#13-the-deterministic-4-phase-frame-loop)
+14. [Complete Playable Example](#14-complete-playable-example)
 
 ---
 
@@ -399,13 +400,22 @@ fn draw_dashed_net() {
 
 ## 11. Built-In PSP Runtime Functions & Input
 
-### Rendering (480×272 Logical Coordinates)
+### Rendering, Camera & Persistence (480×272 Logical Coordinates)
 
 | Function | Signature | Description |
 | :--- | :--- | :--- |
 | `clear_screen` | `(color) -> void` | Clears the screen with an ABGR8888 color |
 | `draw_rect` | `(rect, color) -> void` | Draws a filled rectangle |
 | `sprite` | `(asset, vec2[, color]) -> void` | Draws a baked texture at `pos` with optional tint |
+| `draw_subsprite` | `(asset, rect, vec2[, color]) -> void` | Draws a sub-rectangle (`src_rect`) from a spritesheet at `pos` |
+| `draw_tilemap` | `(asset, [N]u8, int, int, int[, vec2]) -> void` | Draws a culled tilemap grid (`cols`, `rows`, `tile_size`, optional `origin`) |
+| `set_camera` | `(vec2) -> void` | Sets the 2D world camera offset (`camera_pos`) |
+| `get_camera` | `() -> vec2` | Returns the current 2D camera offset |
+| `set_camera_enabled` | `(bool) -> void` | Enables (`true`) or disables (`false`, screen-space HUD) camera offsets |
+| `draw_text` | `(string, vec2[, color[, int]]) -> void` | Draws 8×8 bitmap text (supports `\n` and integer `scale`) |
+| `draw_number` | `(int, vec2[, color[, int]]) -> void` | Draws an integer using the 8×8 bitmap font |
+| `save_game` | `() -> bool` | Saves all `global var` fields to Memory Stick (`sceUtilitySavedata`) / desktop file |
+| `load_game` | `() -> bool` | Loads and verifies checksummed `global var` save data |
 
 ### Input
 
@@ -432,7 +442,50 @@ PSP button bitmasks (matching `Runtime/psps_input.h`):
 
 ---
 
-## 12. The Deterministic 4-Phase Frame Loop
+## 12. 2D Camera, Tilemaps, Bitmap Fonts & Save Data
+
+PSPScript includes built-in runtime support for scrolling worlds, spritesheets, HUD text, and Memory Stick save data without any dynamic heap allocation:
+
+```pspscript
+asset world_sheet = texture("tiles.png", format: RGBA4444)
+
+// All 'global var' fields are packed into a contiguous PspsGlobalState_t struct
+// that save_game() and load_game() serialize atomically with an FNV-1a checksum.
+global var high_score: int = 0
+global var world_tiles: [64]u8
+
+state Overworld {
+    init() {
+        if !load_game() {
+            high_score = 0
+            save_game()
+        }
+        world_tiles[0] = 1
+        set_camera({ 32.0, 16.0 })
+    }
+
+    draw() {
+        clear_screen(#0B1021)
+
+        // 1. World-space rendering (follows camera_pos with 480x272 frustum culling)
+        set_camera_enabled(true)
+        draw_tilemap(world_sheet, world_tiles, 8, 8, 16)
+        draw_subsprite(world_sheet, { 0.0, 0.0, 16.0, 16.0 }, { 64.0, 48.0 })
+
+        // 2. Screen-space HUD rendering (ignores camera_pos)
+        set_camera_enabled(false)
+        draw_text("HIGH SCORE:", { 8.0, 8.0 }, #FFFFFF, 2)
+        draw_number(high_score, { 192.0, 8.0 }, #FFF275, 2)
+    }
+}
+```
+
+- **PSP Hardware (`__PSP__`)**: `save_game()` and `load_game()` invoke `sceUtilitySavedata` (`PSP_UTILITY_SAVEDATA_AUTOSAVE` / `AUTOLOAD`) to persist `DATA.BIN` under `ms0:/PSP/SAVEDATA/`.
+- **Desktop Preview**: The same checksummed binary format is saved to `savedata/<GAME_ID>.bin` for local testing.
+
+---
+
+## 13. The Deterministic 4-Phase Frame Loop
 
 Every compiled PSPScript program executes the same predictable loop per frame:
 
@@ -460,7 +513,7 @@ Every compiled PSPScript program executes the same predictable loop per frame:
 
 ---
 
-## 13. Complete Playable Example
+## 14. Complete Playable Example
 
 For a complete, playable PSP homebrew game showcasing singletons, pooled actors, timers, typed messages, AABB collision, state transitions, and 2D rendering, see **[examples/pong.psps](../examples/pong.psps)** and run:
 

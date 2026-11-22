@@ -191,7 +191,7 @@
       "patterns": [
         {
           "name": "support.function.builtin.pspscript",
-          "match": "\\b(sprite|draw_rect|draw_text|clear_screen|play_sound|button_pressed|button_held|sin|cos|sqrt|abs|min|max|clamp|lerp|print|texture|sound|font)(?=\\s*\\()"
+          "match": "\\b(sprite|draw_subsprite|draw_tilemap|set_camera|get_camera|set_camera_enabled|draw_rect|draw_text|draw_number|clear_screen|save_game|load_game|play_sound|button_pressed|button_held|sin|cos|sqrt|abs|min|max|clamp|lerp|print|texture|sound|font)(?=\\s*\\()"
         }
       ]
     },
