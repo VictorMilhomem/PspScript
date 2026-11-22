@@ -86,20 +86,23 @@ if (!inputPath.EndsWith(".psps", StringComparison.OrdinalIgnoreCase))
     Console.Error.WriteLine($"Warning: Input file '{inputPath}' does not use the '.psps' extension.");
 }
 
-string source = File.ReadAllText(inputPath);
-
 // ============================================================================
-// Parsing
+// Parsing & Module Resolution (import "...")
 // ============================================================================
-Console.WriteLine($"[1/4] Parsing '{inputPath}'...");
+Console.WriteLine($"[1/4] Parsing & resolving modules from '{inputPath}'...");
 
-if (!PspParser.TryParse(source, out var program, out var parseError) || program is null)
+var loadResult = ModuleLoader.Load(inputPath);
+if (!loadResult.Success || loadResult.Program is null)
 {
-    PrintParseError(inputPath, source, parseError);
+    foreach (var err in loadResult.Errors)
+    {
+        PrintModuleLoadError(err);
+    }
     return 1;
 }
 
-Console.WriteLine($"      Parsed {program.Declarations.Count} top-level declaration(s).");
+var program = loadResult.Program;
+Console.WriteLine($"      Loaded {loadResult.LoadedFiles.Count} module(s), {program.Declarations.Count} top-level declaration(s).");
 
 // ============================================================================
 // Semantic Analysis & Type Checking
@@ -214,28 +217,33 @@ static void PrintUsage()
       -h, --help                Display this help message
 
     Examples:
-      dotnet run -- examples/pong.psps
-      dotnet run -- examples/pong.psps --c-only --desktop
-      dotnet run -- examples/pong.psps --check --dump-ast
+      dotnet run -- examples/pong/main.psps
+      dotnet run -- examples/pong/main.psps --c-only --desktop
+      dotnet run -- examples/pong/main.psps --check --dump-ast
     """);
 }
 
-static void PrintParseError(string filePath, string source, Parlot.ParseError? error)
+static void PrintModuleLoadError(ModuleLoadError error)
 {
-    int line = error?.Position.Line ?? 1;
-    int col = error?.Position.Column ?? 1;
-    string msg = error?.Message ?? "Invalid syntax";
-
-    Console.Error.WriteLine($"{filePath}({line}:{col}): error: {msg}");
-
-    string[] lines = source.Replace("\r\n", "\n").Split('\n');
-    if (line >= 1 && line <= lines.Length)
+    if (error.Line > 0)
     {
-        string sourceLine = lines[line - 1];
-        Console.Error.WriteLine($"  {line} | {sourceLine}");
-        string gutterPad = new(' ', line.ToString().Length);
-        int caretOffset = Math.Max(0, col - 1);
-        Console.Error.WriteLine($"  {gutterPad} | {new string(' ', caretOffset)}^");
+        Console.Error.WriteLine($"{error.FilePath}({error.Line}:{error.Column}): error: {error.Message}");
+        if (!string.IsNullOrEmpty(error.SourceText))
+        {
+            string[] lines = error.SourceText.Replace("\r\n", "\n").Split('\n');
+            if (error.Line <= lines.Length)
+            {
+                string sourceLine = lines[error.Line - 1];
+                Console.Error.WriteLine($"  {error.Line} | {sourceLine}");
+                string gutterPad = new(' ', error.Line.ToString().Length);
+                int caretOffset = Math.Max(0, error.Column - 1);
+                Console.Error.WriteLine($"  {gutterPad} | {new string(' ', caretOffset)}^");
+            }
+        }
+    }
+    else
+    {
+        Console.Error.WriteLine($"{error.FilePath}: error: {error.Message}");
     }
 }
 

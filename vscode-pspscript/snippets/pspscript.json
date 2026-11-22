@@ -1,4 +1,11 @@
 {
+  "Import Module": {
+    "prefix": "import",
+    "body": [
+      "import \"${1:actors/player.psps}\""
+    ],
+    "description": "Import another PSPScript (.psps) module file"
+  },
   "Game Config": {
     "prefix": "game",
     "body": [

@@ -38,17 +38,17 @@ On hardware without virtual memory, frequent `malloc`/`free` calls fragment RAM 
 
 ## 2. Quick Start & CLI Workflow
 
-Create a file with the `.psps` extension (for example, `examples/pong.psps`), then run the PSPScript compiler:
+Create a file with the `.psps` extension (for example, `examples/pong/main.psps`), then run the PSPScript compiler:
 
 ```bash
 # 1. Full build: parse, type-check, emit build/out.c, and package build/EBOOT.PBP via Podman/Docker
-dotnet run -- examples/pong.psps
+dotnet run -- examples/pong/main.psps
 
 # 2. Fast desktop preview on Linux (generates build/out.c and compiles build/game_desktop with SDL2)
-dotnet run -- examples/pong.psps --c-only --desktop && ./build/game_desktop
+dotnet run -- examples/pong/main.psps --c-only --desktop && ./build/game_desktop
 
 # 3. Validate syntax, types, and static RAM budget without emitting C code
-dotnet run -- examples/pong.psps --check --dump-ast
+dotnet run -- examples/pong/main.psps --check --dump-ast
 ```
 
 > **Tip (VS Code Syntax Highlighting):** Install the bundled extension from `vscode-pspscript/` for `.psps` syntax highlighting, file icons, and code snippets:
@@ -58,7 +58,23 @@ dotnet run -- examples/pong.psps --check --dump-ast
 
 ---
 
-## 3. Game Configuration & Static Memory Budget
+## 3. Game Configuration, Imports & Static Memory Budget
+
+### Splitting Projects with `import`
+
+Large games can be split across multiple `.psps` files using top-level `import` declarations:
+
+```pspscript
+import "shared/math.psps"
+import "actors/paddles"      // '.psps' extension is optional
+import "actors/ball.psps"
+```
+
+- Paths are resolved relative to the file containing the `import`.
+- Diamond imports (multiple files importing the same shared module) are automatically deduplicated (`#pragma once` semantics).
+- Circular imports are detected and reported at compile time.
+
+### Game Configuration (`game`)
 
 Every `.psps` program can declare a `game` block to configure the PSP `EBOOT.PBP` title, target frame rate, and static RAM budget:
 
@@ -515,12 +531,12 @@ Every compiled PSPScript program executes the same predictable loop per frame:
 
 ## 14. Complete Playable Example
 
-For a complete, playable PSP homebrew game showcasing singletons, pooled actors, timers, typed messages, AABB collision, state transitions, and 2D rendering, see **[examples/pong.psps](../examples/pong.psps)** and run:
+For a complete, playable modular PSP homebrew game showcasing `import`, singletons, pooled actors, timers, typed messages, AABB collision, bitmap font HUDs, save data, state transitions, and 2D rendering, see **[examples/pong/main.psps](../examples/pong/main.psps)** and run:
 
 ```bash
 # Build PSP EBOOT.PBP
-dotnet run -- examples/pong.psps
+dotnet run -- examples/pong/main.psps
 
 # Or play immediately on desktop Linux
-dotnet run -- examples/pong.psps --c-only --desktop && ./build/game_desktop
+dotnet run -- examples/pong/main.psps --c-only --desktop && ./build/game_desktop
 ```

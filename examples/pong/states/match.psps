@@ -1,0 +1,96 @@
+import "../shared/constants"
+import "../shared/math"
+import "../actors/paddles"
+import "../actors/ball"
+
+state Match {
+    init() {
+        if !save_loaded {
+            load_game()
+            save_loaded = true
+        }
+
+        PlayerPaddle.pos = { 20.0, 108.0 }
+        CpuPaddle.pos = { 450.0, 108.0 }
+        spawn Ball { pos: { 236.0, 132.0 }, vel: { -180.0, 95.0 } }
+    }
+
+    update(dt: f32) {
+        each b in Ball {
+            // Guide CPU paddle toward the active ball center
+            CpuPaddle.track_y = b.pos.y + (b.size * 0.5)
+
+            // Left paddle (Player) collision
+            if b.vel.x < 0.0 && check_aabb(
+                b.pos.x, b.pos.y, b.size, b.size,
+                PlayerPaddle.pos.x, PlayerPaddle.pos.y, PlayerPaddle.size.x, PlayerPaddle.size.y
+            ) {
+                b.pos.x = PlayerPaddle.pos.x + PlayerPaddle.size.x
+                var hit_offset: f32 = ((b.pos.y + b.size * 0.5) - (PlayerPaddle.pos.y + PlayerPaddle.size.y * 0.5)) / (PlayerPaddle.size.y * 0.5)
+                send(b, PaddleBounce { dir_x: 1.0, offset_y: hit_offset })
+            }
+
+            // Right paddle (CPU) collision
+            if b.vel.x > 0.0 && check_aabb(
+                b.pos.x, b.pos.y, b.size, b.size,
+                CpuPaddle.pos.x, CpuPaddle.pos.y, CpuPaddle.size.x, CpuPaddle.size.y
+            ) {
+                b.pos.x = CpuPaddle.pos.x - b.size
+                var hit_offset_cpu: f32 = ((b.pos.y + b.size * 0.5) - (CpuPaddle.pos.y + CpuPaddle.size.y * 0.5)) / (CpuPaddle.size.y * 0.5)
+                send(b, PaddleBounce { dir_x: -1.0, offset_y: hit_offset_cpu })
+            }
+
+            // Check left goal (CPU scored)
+            if b.pos.x + b.size < 0.0 {
+                cpu_score += 1
+                b.pos = { 236.0, 132.0 }
+                b.vel = { 180.0, 90.0 }
+                b.serve_delay = 750ms
+            }
+
+            // Check right goal (Player scored)
+            if b.pos.x > 480.0 {
+                player_score += 1
+                b.pos = { 236.0, 132.0 }
+                b.vel = { -180.0, -90.0 }
+                b.serve_delay = 750ms
+            }
+        }
+
+        if player_score >= 5 {
+            last_winner_is_player = true
+            player_wins += 1
+            save_game()
+            goto GameOver
+        }
+        if cpu_score >= 5 {
+            last_winner_is_player = false
+            goto GameOver
+        }
+    }
+
+    draw() {
+        clear_screen(#0B1021)
+
+        // Top and bottom court borders
+        draw_rect({ 0.0, 10.0, 480.0, 4.0 }, #263859)
+        draw_rect({ 0.0, 258.0, 480.0, 4.0 }, #263859)
+
+        // Center dashed net
+        var net_y: f32 = 20.0
+        while net_y < 250.0 {
+            draw_rect({ 239.0, net_y, 2.0, 10.0 }, #263859)
+            net_y += 20.0
+        }
+
+        // HUD Scores using the embedded 8x8 bitmap font
+        draw_number(player_score, { 200.0, 22.0 }, #00E5FF, 2)
+        draw_number(cpu_score, { 264.0, 22.0 }, #FF2A6D, 2)
+    }
+
+    exit() {
+        each b in Ball {
+            destroy b
+        }
+    }
+}

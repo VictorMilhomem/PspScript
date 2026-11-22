@@ -11,6 +11,8 @@ public record ProgramNode(IReadOnlyList<TopDecl> Declarations): AstNode;
 
 public abstract record TopDecl : AstNode;
 
+public record ImportDecl(string Path) : TopDecl;
+
 public record GameConfigDecl(
     string Title,
     IReadOnlyDictionary<string, ConfigValue> Settings

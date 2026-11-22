@@ -1,0 +1,25 @@
+import "../shared/constants"
+
+state GameOver {
+    rematch_timer: timer = 3.0s
+
+    update(dt: f32) {
+        if rematch_timer.elapsed() || button_pressed(BTN_CROSS) {
+            goto Match
+        }
+    }
+
+    draw() {
+        clear_screen(#070A14)
+
+        if last_winner_is_player {
+            draw_text("YOU WIN!", { 176.0, 96.0 }, #00E5FF, 2)
+        } else {
+            draw_text("CPU WINS!", { 168.0, 96.0 }, #FF2A6D, 2)
+        }
+
+        draw_text("TOTAL WINS:", { 152.0, 136.0 }, #FFFFFF, 1)
+        draw_number(player_wins, { 248.0, 136.0 }, #FFF275, 1)
+        draw_text("PRESS X TO REMATCH", { 168.0, 168.0 }, #8899AA, 1)
+    }
+}

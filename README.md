@@ -54,7 +54,7 @@ actor Ball[4] {
 }
 ```
 
-See the full playable game in [examples/pong.psps](examples/pong.psps).
+See the full modular playable game in [examples/pong/main.psps](examples/pong/main.psps).
 
 ---
 
@@ -69,13 +69,13 @@ See the full playable game in [examples/pong.psps](examples/pong.psps).
 
 ```bash
 # 1. Full pipeline: parse, type-check, emit build/out.c, and package build/EBOOT.PBP
-dotnet run -- examples/pong.psps
+dotnet run -- examples/pong/main.psps
 
 # 2. Fast local desktop preview on Linux (generates build/out.c and compiles build/game_desktop)
-dotnet run -- examples/pong.psps --c-only --desktop && ./build/game_desktop
+dotnet run -- examples/pong/main.psps --c-only --desktop && ./build/game_desktop
 
 # 3. Validate syntax, types, and static RAM budget without emitting C code
-dotnet run -- examples/pong.psps --check --dump-ast
+dotnet run -- examples/pong/main.psps --check --dump-ast
 ```
 
 ### CLI Options
@@ -112,7 +112,7 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 | `Semantics/` | Two-pass semantic analyzer, symbol table, type checker, and static RAM budget validator |
 | `CodeGen/` | Modular C99 code generator (`CSourceWriter`, `CTypeMapper`, `Actors`, `States`, `Statements`, `Expressions`) |
 | `Runtime/` | Zero-heap STB-style C99 headers (`psps_runtime.h`, `psps_types.h`, `psps_arena.h`, `psps_video.h`, `psps_input.h`, `psps_save.h`) |
-| `examples/` | Sample `.psps` games ([examples/pong.psps](examples/pong.psps)) |
+| `examples/` | Modular sample `.psps` game ([examples/pong/main.psps](examples/pong/main.psps)) |
 | `docs/` | [Language Tutorial](docs/tutorial.md) & [EBNF Grammar](docs/grammar.md) |
 | `vscode-pspscript/` | VS Code syntax highlighting extension & snippets |
 | `Makefile` & `docker-compose.yml` | Podman/PSPSDK cross-compilation (`psp-gcc` → `psp-prxgen` → `EBOOT.PBP`) and desktop preview targets |

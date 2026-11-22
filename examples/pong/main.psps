@@ -1,0 +1,15 @@
+// ============================================================================
+// PSP Pong - Modular Multi-File PSPScript Entry Point (480x272)
+// ============================================================================
+
+game "PSP Pong" {
+    ram_budget: 16MB,
+    fps: 60
+}
+
+import "shared/constants.psps"
+import "shared/math.psps"
+import "actors/paddles.psps"
+import "actors/ball.psps"
+import "states/match.psps"
+import "states/game_over.psps"

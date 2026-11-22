@@ -1,0 +1,45 @@
+import "../shared/constants"
+
+actor PlayerPaddle {
+    pos: vec2 = { 20.0, 108.0 }
+    size: vec2 = { 10.0, 56.0 }
+    speed: f32 = 190.0
+    tint: color = #00E5FF
+
+    update(dt: f32) {
+        if button_held(BTN_UP) {
+            pos.y -= speed * dt
+        }
+        if button_held(BTN_DOWN) {
+            pos.y += speed * dt
+        }
+        pos.y = clamp(pos.y, 16.0, 256.0 - size.y)
+    }
+
+    draw() {
+        draw_rect({ pos.x, pos.y, size.x, size.y }, tint)
+    }
+}
+
+actor CpuPaddle {
+    pos: vec2 = { 450.0, 108.0 }
+    size: vec2 = { 10.0, 56.0 }
+    speed: f32 = 160.0
+    track_y: f32 = 136.0
+    tint: color = #FF2A6D
+
+    update(dt: f32) {
+        var center_y: f32 = pos.y + (size.y * 0.5)
+        if track_y < center_y - 4.0 {
+            pos.y -= speed * dt
+        }
+        if track_y > center_y + 4.0 {
+            pos.y += speed * dt
+        }
+        pos.y = clamp(pos.y, 16.0, 256.0 - size.y)
+    }
+
+    draw() {
+        draw_rect({ pos.x, pos.y, size.x, size.y }, tint)
+    }
+}

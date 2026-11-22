@@ -81,6 +81,10 @@
         {
           "match": "\\b(game)\\b",
           "name": "storage.type.game.pspscript"
+        },
+        {
+          "match": "\\b(import)\\b",
+          "name": "keyword.control.import.pspscript"
         }
       ]
     },

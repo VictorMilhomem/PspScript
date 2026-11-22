@@ -1,0 +1,37 @@
+import "../shared/constants"
+
+actor Ball[4] {
+    pos: vec2 = { 236.0, 132.0 }
+    vel: vec2 = { -180.0, 90.0 }
+    size: f32 = 8.0
+    serve_delay: timer = 0.75s
+    tint: color = #FFF275
+
+    on PaddleBounce(msg) {
+        var speed_x: f32 = clamp(abs(vel.x) * 1.06, 180.0, 340.0)
+        vel.x = speed_x * msg.dir_x
+        vel.y = clamp(vel.y + (msg.offset_y * 160.0), -230.0, 230.0)
+    }
+
+    update(dt: f32) {
+        if !serve_delay.elapsed() {
+            return
+        }
+
+        pos += vel * dt
+
+        // Bounce off top and bottom arena walls
+        if pos.y <= 16.0 {
+            pos.y = 16.0
+            vel.y = abs(vel.y)
+        }
+        if pos.y + size >= 256.0 {
+            pos.y = 256.0 - size
+            vel.y = -abs(vel.y)
+        }
+    }
+
+    draw() {
+        draw_rect({ pos.x, pos.y, size, size }, tint)
+    }
+}

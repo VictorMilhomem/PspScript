@@ -1,6 +1,7 @@
 Program        ::= TopDecl* EOF
 
-TopDecl        ::= GameConfig
+TopDecl        ::= ImportDecl
+                 | GameConfig
                  | AssetDecl
                  | MessageDecl
                  | StructDecl
@@ -8,6 +9,10 @@ TopDecl        ::= GameConfig
                  | StateDecl
                  | GlobalVarDecl
                  | FuncDecl
+
+// Compile-time module import (relative path, auto-deduplicated)
+ImportDecl     ::= "import" STRING
+// E.g.: import "actors/player.psps"
 
 // Global EBOOT configuration and memory budget
 GameConfig     ::= "game" STRING "{" ConfigField* "}"

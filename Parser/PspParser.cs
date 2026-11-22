@@ -12,7 +12,7 @@ public static class PspParser
 
     private static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
     {
-        "game", "asset", "message", "struct", "actor", "state",
+        "import", "game", "asset", "message", "struct", "actor", "state",
         "global", "level", "temp", "var", "fn",
         "init", "update", "draw", "exit", "on",
         "int", "u8", "u16", "u32", "f32", "bool", "void",
@@ -602,7 +602,12 @@ public static class PspParser
         // Root Program
         // ====================================================================
 
+        var importDecl = Keyword("import")
+            .SkipAnd(stringLiteral.ElseError("Expected module path string after 'import'"))
+            .Then<TopDecl>(static (context, path) => new ImportDecl(path));
+
         var topDecl = OneOf(
+            importDecl,
             gameConfigDecl,
             assetDecl,
             messageDecl,

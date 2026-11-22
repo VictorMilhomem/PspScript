@@ -1,0 +1,20 @@
+// Shared messages, button bitmasks, and game state variables
+
+message PaddleBounce {
+    dir_x: f32,
+    offset_y: f32
+}
+
+// Persistent globals (saved via save_game() / load_game())
+global var player_wins: int = 0
+global var last_winner_is_player: bool = true
+global var save_loaded: bool = false
+
+// Input bitmasks matching Runtime/psps_input.h (psps_button_t)
+global var BTN_CROSS: int = 1
+global var BTN_UP: int = 16
+global var BTN_DOWN: int = 32
+
+// Level-scoped match scores (reset automatically on 'goto')
+level var player_score: int = 0
+level var cpu_score: int = 0
