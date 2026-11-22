@@ -54,7 +54,7 @@ LDFLAGS          := -L$(PSPDEV)/psp/lib \
 LIBS             := $(if $(PSP_SDL2_LIBS),$(PSP_SDL2_LIBS),-lSDL2main -lSDL2) \
                     -lGL -lpspgu -lpspgum -lpspvfpu -lpspvram \
                     -lpspaudio -lpspctrl -lpspdisplay -lpspge \
-                    -lpsprtc -lpsppower -lpspdebug -lpsphprm \
+                    -lpsprtc -lpsppower -lpspdebug -lpsphprm -lpsputility \
                     -lm -lc -lpspuser -lpspkernel
 
 # Host desktop compiler settings for fast local testing (`make desktop`)

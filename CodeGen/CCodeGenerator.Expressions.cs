@@ -70,6 +70,9 @@ public sealed partial class CCodeGenerator
         if (_symbols.Actors.TryGetValue(name, out var actorSym) && actorSym.IsSingleton)
             return $"{actorSym.Name}_singleton_ref()";
 
+        if (_symbols.Globals.TryGetValue(name, out var gSym) && gSym.Scope == MemoryScope.Global)
+            return $"g_globals.{name}";
+
         return name;
     }
 
@@ -287,11 +290,47 @@ public sealed partial class CCodeGenerator
             "sprite" when emitted.Count >= 3 =>
                 $"psps_draw_sprite({emitted[0]}, {emitted[1]}, {emitted[2]})",
 
+            "draw_subsprite" when emitted.Count == 3 =>
+                $"psps_draw_subsprite({emitted[0]}, {emitted[1]}, {emitted[2]}, PSPS_COLOR_WHITE)",
+            "draw_subsprite" when emitted.Count >= 4 =>
+                $"psps_draw_subsprite({emitted[0]}, {emitted[1]}, {emitted[2]}, {emitted[3]})",
+
+            "draw_tilemap" when emitted.Count == 5 =>
+                $"psps_draw_tilemap({emitted[0]}, &(psps_tilemap_t){{ .tiles = (const uint8_t*)({emitted[1]}), .cols = (uint16_t)({emitted[2]}), .rows = (uint16_t)({emitted[3]}), .tile_size = (uint16_t)({emitted[4]}) }}, vec2_make(0.0f, 0.0f), PSPS_COLOR_WHITE)",
+            "draw_tilemap" when emitted.Count >= 6 =>
+                $"psps_draw_tilemap({emitted[0]}, &(psps_tilemap_t){{ .tiles = (const uint8_t*)({emitted[1]}), .cols = (uint16_t)({emitted[2]}), .rows = (uint16_t)({emitted[3]}), .tile_size = (uint16_t)({emitted[4]}) }}, {emitted[5]}, PSPS_COLOR_WHITE)",
+
+            "set_camera" when emitted.Count == 1 =>
+                $"psps_video_set_camera({emitted[0]})",
+            "get_camera" =>
+                "psps_video_get_camera()",
+            "set_camera_enabled" when emitted.Count == 1 =>
+                $"psps_video_set_camera_enabled({emitted[0]})",
+
             "draw_rect" when emitted.Count >= 2 =>
                 $"psps_draw_rect({emitted[0]}, {emitted[1]})",
 
+            "draw_text" when emitted.Count == 2 =>
+                $"psps_draw_text({emitted[0]}, {emitted[1]}, PSPS_COLOR_WHITE)",
+            "draw_text" when emitted.Count == 3 =>
+                $"psps_draw_text({emitted[0]}, {emitted[1]}, {emitted[2]})",
+            "draw_text" when emitted.Count >= 4 =>
+                $"psps_draw_text_scaled({emitted[0]}, {emitted[1]}, (int)({emitted[3]}), {emitted[2]})",
+
+            "draw_number" when emitted.Count == 2 =>
+                $"psps_draw_number((int32_t)({emitted[0]}), {emitted[1]}, PSPS_COLOR_WHITE, 1)",
+            "draw_number" when emitted.Count == 3 =>
+                $"psps_draw_number((int32_t)({emitted[0]}), {emitted[1]}, {emitted[2]}, 1)",
+            "draw_number" when emitted.Count >= 4 =>
+                $"psps_draw_number((int32_t)({emitted[0]}), {emitted[1]}, {emitted[2]}, (int)({emitted[3]}))",
+
             "clear_screen" when emitted.Count >= 1 =>
                 $"psps_clear_screen({emitted[0]})",
+
+            "save_game" =>
+                "psps_save_write(PSPS_SAVE_GAME_ID, PSPS_SAVE_TITLE, &g_globals, sizeof(g_globals))",
+            "load_game" =>
+                "psps_save_read(PSPS_SAVE_GAME_ID, &g_globals, sizeof(g_globals))",
 
             "button_pressed" when emitted.Count >= 1 =>
                 $"psps_input_pressed((uint32_t)({emitted[0]}))",

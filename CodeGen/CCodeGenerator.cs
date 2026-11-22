@@ -177,7 +177,38 @@ public sealed partial class CCodeGenerator
             _writer.WriteLine();
         }
 
-        foreach (var decl in _program.Declarations.OfType<GlobalVarDecl>())
+        string saveTitle = _symbols.GameConfig?.Title ?? "PSPScript Game";
+        _writer.WriteLine($"#define PSPS_SAVE_GAME_ID        \"PSPS00001\"");
+        _writer.WriteLine($"#define PSPS_SAVE_TITLE          \"{CTypeMapper.EscapeCString(saveTitle)}\"");
+        _writer.WriteLine();
+
+        // Contiguous global state struct (for zero-heap save_game / load_game persistence)
+        var persistentGlobals = _program.Declarations
+            .OfType<GlobalVarDecl>()
+            .Where(static g => g.Scope == MemoryScope.Global)
+            .ToList();
+
+        _writer.OpenBlock("typedef struct PspsGlobalState");
+        if (persistentGlobals.Count == 0)
+        {
+            _writer.WriteLine("uint32_t _reserved;");
+        }
+        else
+        {
+            foreach (var decl in persistentGlobals)
+            {
+                if (_symbols.Globals.TryGetValue(decl.Name, out var gSym))
+                {
+                    _writer.WriteLine($"{CTypeMapper.FormatFieldDeclaration(gSym.Type, decl.Name)};");
+                }
+            }
+        }
+        _writer.CloseBlock(" PspsGlobalState_t;");
+        _writer.WriteLine("static PspsGlobalState_t g_globals;");
+        _writer.WriteLine();
+
+        // Level-scoped variables (reset on every 'goto' state transition)
+        foreach (var decl in _program.Declarations.OfType<GlobalVarDecl>().Where(static g => g.Scope == MemoryScope.LevelArena))
         {
             if (!_symbols.Globals.TryGetValue(decl.Name, out var gSym))
                 continue;
@@ -190,12 +221,14 @@ public sealed partial class CCodeGenerator
         var rootCtx = new EmissionContext();
 
         _writer.OpenBlock("static void psps_init_all_globals(void)");
+        _writer.WriteLine("memset(&g_globals, 0, sizeof(g_globals));");
         foreach (var decl in _program.Declarations.OfType<GlobalVarDecl>())
         {
             if (!_symbols.Globals.TryGetValue(decl.Name, out var gSym))
                 continue;
 
-            EmitFieldOrVarInitializer(decl.Name, gSym.Type, decl.Initializer, rootCtx);
+            string targetName = decl.Scope == MemoryScope.Global ? $"g_globals.{decl.Name}" : decl.Name;
+            EmitFieldOrVarInitializer(targetName, gSym.Type, decl.Initializer, rootCtx);
         }
         _writer.CloseBlock();
         _writer.WriteLine();

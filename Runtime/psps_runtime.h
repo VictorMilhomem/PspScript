@@ -22,6 +22,9 @@
     #ifndef PSPS_INPUT_IMPLEMENTATION
         #define PSPS_INPUT_IMPLEMENTATION
     #endif
+    #ifndef PSPS_SAVE_IMPLEMENTATION
+        #define PSPS_SAVE_IMPLEMENTATION
+    #endif
 #endif
 
 #include "psps_utils.h"
@@ -29,5 +32,6 @@
 #include "psps_arena.h"
 #include "psps_video.h"
 #include "psps_input.h"
+#include "psps_save.h"
 
 #endif /* PSPS_RUNTIME_H */

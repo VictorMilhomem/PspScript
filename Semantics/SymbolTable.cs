@@ -243,10 +243,30 @@ public sealed class SymbolTable
 
     private void RegisterBuiltinIntrinsics()
     {
-        // PSP 2D Rendering & Audio / Input / Math runtime intrinsics
+        // PSP 2D Rendering, Camera, Tilemap, Font, Save & Input / Math runtime intrinsics
         RegisterBuiltin("sprite", ResolvedType.Void, isVariadic: true,
             new ParamSymbol("texture", new AssetType("texture")),
             new ParamSymbol("pos", ResolvedType.Vec2));
+
+        RegisterBuiltin("draw_subsprite", ResolvedType.Void, isVariadic: true,
+            new ParamSymbol("texture", new AssetType("texture")),
+            new ParamSymbol("src", ResolvedType.Rect),
+            new ParamSymbol("pos", ResolvedType.Vec2));
+
+        RegisterBuiltin("draw_tilemap", ResolvedType.Void, isVariadic: true,
+            new ParamSymbol("tileset", new AssetType("texture")),
+            new ParamSymbol("tiles", ResolvedType.Any),
+            new ParamSymbol("cols", ResolvedType.Int),
+            new ParamSymbol("rows", ResolvedType.Int),
+            new ParamSymbol("tile_size", ResolvedType.Int));
+
+        RegisterBuiltin("set_camera", ResolvedType.Void, isVariadic: false,
+            new ParamSymbol("pos", ResolvedType.Vec2));
+
+        RegisterBuiltin("get_camera", ResolvedType.Vec2, isVariadic: false);
+
+        RegisterBuiltin("set_camera_enabled", ResolvedType.Void, isVariadic: false,
+            new ParamSymbol("enabled", ResolvedType.Bool));
 
         RegisterBuiltin("draw_rect", ResolvedType.Void, isVariadic: false,
             new ParamSymbol("bounds", ResolvedType.Rect),
@@ -256,8 +276,16 @@ public sealed class SymbolTable
             new ParamSymbol("text", ResolvedType.String),
             new ParamSymbol("pos", ResolvedType.Vec2));
 
+        RegisterBuiltin("draw_number", ResolvedType.Void, isVariadic: true,
+            new ParamSymbol("value", ResolvedType.Int),
+            new ParamSymbol("pos", ResolvedType.Vec2));
+
         RegisterBuiltin("clear_screen", ResolvedType.Void, isVariadic: false,
             new ParamSymbol("color", ResolvedType.Color));
+
+        RegisterBuiltin("save_game", ResolvedType.Bool, isVariadic: false);
+
+        RegisterBuiltin("load_game", ResolvedType.Bool, isVariadic: false);
 
         RegisterBuiltin("play_sound", ResolvedType.Void, isVariadic: true,
             new ParamSymbol("sound", ResolvedType.Any));
