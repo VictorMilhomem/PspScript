@@ -7,7 +7,7 @@
 #include "psps_utils.h"
 
 /* ============================================================================
- * 1. Vector & Geometry Primitives (16-byte aligned for PSP Allegrex VFPU)
+ * Vector & Geometry Primitives (16-byte aligned for PSP Allegrex VFPU)
  * ============================================================================ */
 
 typedef struct PSPS_ALIGNED(16) vec2 {
@@ -137,7 +137,7 @@ static inline bool rect_intersects(rect_t a, rect_t b) {
 }
 
 /* ============================================================================
- * 2. Native PSP Color (Packed ABGR8888: 0xAABBGGRR)
+ * Native PSP Color (Packed ABGR8888: 0xAABBGGRR)
  * ============================================================================ */
 
 typedef uint32_t psps_color_t;
@@ -170,7 +170,7 @@ static inline uint8_t psps_color_a(psps_color_t abgr) {
 }
 
 /* ============================================================================
- * 3. First-Class Countdown Timer Primitive
+ * First-Class Countdown Timer Primitive
  * ============================================================================ */
 
 typedef struct psps_timer {
@@ -209,7 +209,7 @@ static inline void psps_timer_reset(psps_timer_t* timer) {
 }
 
 /* ============================================================================
- * 4. 32-Bit Generational Actor Reference Handle (ref<T>)
+ * 32-Bit Generational Actor Reference Handle (ref<T>)
  * ============================================================================ */
 
 #define PSPS_INVALID_INDEX ((uint16_t)0xFFFFu)
