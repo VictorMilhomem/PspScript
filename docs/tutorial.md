@@ -221,11 +221,17 @@ struct Stats {
 
 ### Compile-Time Assets (`asset`)
 
-Assets declare textures or media baked into the binary and uploaded to VRAM at startup:
+Assets declare PNG textures or spritesheets that are decoded at **compile time** by `AssetBaker.cs` and embedded directly into static C99 pixel arrays—requiring zero runtime file I/O or heap allocation on PSP:
 
 ```pspscript
-asset ship_tex = texture("ship.png", format: RGBA4444)
+// Full 32-bit color (ABGR8888) — ideal for crisp pixel art & spritesheets
+asset hero_sheet = texture("../assets/Characters/Basic Charakter Spritesheet.png", format: ABGR8888)
+
+// 16-bit color (RGBA4444) — half the VRAM footprint on PSP
+asset house_tex = texture("../assets/Objects/Free_Chicken_House.png", format: RGBA4444)
 ```
+
+Paths are resolved relative to the entry `.psps` file's directory, and uploaded to VRAM automatically at startup with their exact image `(width, height)`.
 
 ---
 
@@ -501,6 +507,33 @@ state Overworld {
 - **PSP Hardware (`__PSP__`)**: `save_game()` and `load_game()` invoke `sceUtilitySavedata` (`PSP_UTILITY_SAVEDATA_AUTOSAVE` / `AUTOLOAD`) to persist `DATA.BIN` under `ms0:/PSP/SAVEDATA/`.
 - **Desktop Preview**: The same checksummed binary format is saved to `savedata/<GAME_ID>.bin` for local testing.
 
+### Spritesheet Animation (`draw_subsprite` + `timer`)
+
+Combine `draw_subsprite` with an auto-ticking `timer` field for smooth frame-rate-independent animations:
+
+```pspscript
+actor Hero {
+    pos: vec2 = { 216.0, 112.0 }
+    dir_row: int = 0             // 0=Down, 1=Up, 2=Left, 3=Right
+    frame: int = 0               // 0..3
+    anim_timer: timer = 140ms
+
+    update(dt: f32) {
+        if anim_timer.elapsed() {
+            frame += 1
+            if frame >= 4 { frame = 0 }
+            anim_timer = 140ms
+        }
+    }
+
+    draw() {
+        var src_x: f32 = frame * 48
+        var src_y: f32 = dir_row * 48
+        draw_subsprite(hero_sheet, { src_x, src_y, 48.0, 48.0 }, pos)
+    }
+}
+```
+
 ---
 
 ## 13. The Deterministic 4-Phase Frame Loop
@@ -531,14 +564,20 @@ Every compiled PSPScript program executes the same predictable loop per frame:
 
 ---
 
-## 14. Complete Playable Example
+## 14. Complete Playable Examples
 
-For a complete, playable modular PSP homebrew game showcasing `import`, singletons, pooled actors, timers, typed messages, AABB collision, bitmap font HUDs, save data, state transitions, and 2D rendering, see **[examples/pong/main.psps](../examples/pong/main.psps)** and run:
+Explore all three modular PSPScript projects in `examples/`:
+
+1. **[examples/pong/main.psps](../examples/pong/main.psps)** — Full Pong game with a message-driven `MainMenu` (`Button[4]`, `ButtonFocus`, `ButtonPress`), selectable CPU difficulty, `Ball[4]` pool, `PaddleBounce` messages, bitmap font HUD, and `save_game()` / `load_game()`.
+2. **[examples/sprite/main.psps](../examples/sprite/main.psps)** — Static PNG sprite baking (`Free_Chicken_House.png`, `Egg_item.png`), D-Pad movement with `temp var`, tint cycling via `CycleTint` message, and pooled bobbing `Egg[8]` actors.
+3. **[examples/anim/main.psps](../examples/anim/main.psps)** — 4-directional spritesheet animation (`Basic Charakter Spritesheet.png`, `Free Chicken Sprites.png`) using `draw_subsprite`, auto-ticking `timer` frame clocks, pooled `Chicken[6]` AI + `Startle` message, and 2D camera tracking.
 
 ```bash
-# Build PSP EBOOT.PBP
+# Build PSP EBOOT.PBP for any example
 dotnet run -- examples/pong/main.psps
+dotnet run -- examples/sprite/main.psps
+dotnet run -- examples/anim/main.psps
 
-# Or play immediately on desktop Linux
-dotnet run -- examples/pong/main.psps --c-only --desktop && ./build/game_desktop
+# Or compile & play on desktop Linux
+dotnet run -- examples/anim/main.psps --c-only --desktop && ./build/game_desktop
 ```

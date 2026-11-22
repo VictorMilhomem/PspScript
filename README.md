@@ -13,7 +13,8 @@ PSPScript enforces static resource budgets at compile time:
 - **Static Memory Arenas**: Memory is explicitly scoped across `global var` (`.bss`), `level var` (`LevelArena`, automatically reset on `goto`), `var` (C stack), and `temp var` (`FrameArena`, wiped every frame).
 - **Static Actor Pools & Generational Handles**: Actors are declared either as singletons (`actor Player`) or fixed-capacity pools (`actor Ball[4]`) and referenced via 32-bit generational handles (`ref<T>`) to prevent dangling-pointer crashes without garbage collection.
 - **Typed Message Passing**: Actor communication uses `message`, `send(...)`, and `on Msg(msg)` handlers lowered to a static tagged union and fixed-capacity frame mailbox.
-- **Game Primitives & Hardware Math**: First-class `vec2`, `vec3`, `rect` (16-byte aligned for VFPU), compile-time ABGR8888 `color` (`#RRGGBB` / `#RRGGBBAA`), and auto-ticking `timer` (`0.5s`, `750ms`) with single-precision `f` suffixes on all floats.
+- **Game Primitives & Compile-Time PNG Baking**: First-class `vec2`, `vec3`, `rect` (16-byte aligned for VFPU), compile-time ABGR8888 `color` (`#RRGGBB` / `#RRGGBBAA`), auto-ticking `timer` (`0.5s`, `750ms`), and a zero-dependency PNG baker (`AssetBaker.cs`) embedding real PNG sprites/spritesheets directly into static `RGBA4444` or `ABGR8888` C99 arrays.
+- **Modular `import` System & Explicit Entry States**: Split games across multiple `.psps` files (`import "actors/ball.psps"`) with automatic diamond deduplication, cycle detection, and explicit `entry: MainMenu` configuration in `game { ... }`.
 
 ---
 
@@ -109,14 +110,24 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 | Path | Description |
 | :--- | :--- |
 | `Ast/` | Immutable C# record AST definitions (`ProgramNode`, `TopDecl`, `Stmt`, `Expr`, `TypeRef`) |
-| `Parser/` | Parlot-based recursive-descent & precedence-climbing parser (`PspParser.cs`) |
-| `Semantics/` | Two-pass semantic analyzer, symbol table, type checker, and static RAM budget validator |
-| `CodeGen/` | Modular C99 code generator (`CSourceWriter`, `CTypeMapper`, `Actors`, `States`, `Statements`, `Expressions`) |
+| `Parser/` | Parlot-based recursive-descent & precedence-climbing parser (`PspParser.cs`) + multi-file `ModuleLoader.cs` |
+| `Semantics/` | Two-pass semantic analyzer, symbol table, type checker, entry state & static RAM budget validator |
+| `CodeGen/` | Modular C99 code generator (`CSourceWriter`, `CTypeMapper`, `AssetBaker`, `Actors`, `States`, `Statements`, `Expressions`) |
 | `Runtime/` | Zero-heap STB-style C99 headers (`psps_runtime.h`, `psps_types.h`, `psps_arena.h`, `psps_video.h`, `psps_input.h`, `psps_save.h`) |
-| `examples/` | Modular sample `.psps` game ([examples/pong/main.psps](examples/pong/main.psps)) |
+| `examples/` | Modular `.psps` projects: [Pong](examples/pong/main.psps), [Sprite Demo](examples/sprite/main.psps), and [Animation Demo](examples/anim/main.psps) |
 | `docs/` | [Language Tutorial](docs/tutorial.md) & [EBNF Grammar](docs/grammar.md) |
 | `vscode-pspscript/` | VS Code syntax highlighting extension & snippets |
 | `Makefile` & `docker-compose.yml` | Podman/PSPSDK cross-compilation (`psp-gcc` → `psp-prxgen` → `EBOOT.PBP`) and desktop preview targets |
+
+---
+
+## Examples
+
+| Example | Entry Point | Showcased Features |
+| :--- | :--- | :--- |
+| **PSP Pong** | [examples/pong/main.psps](examples/pong/main.psps) | Multi-file `import`, `MainMenu` with message-driven `Button[4]` (`ButtonFocus` / `ButtonPress`), difficulty selector, `Ball[4]` pool, `PaddleBounce` messages, bitmap font HUD, `save_game` / `load_game` |
+| **Sprite Demo** | [examples/sprite/main.psps](examples/sprite/main.psps) | Compile-time baked PNGs (`Free_Chicken_House.png`, `Egg_item.png`), `sprite(...)`, tint cycling via `CycleTint` message, bobbing pooled `Egg[8]`, `temp var` normalized movement |
+| **Animation Demo** | [examples/anim/main.psps](examples/anim/main.psps) | Baked spritesheets (`Basic Charakter Spritesheet.png`, `Free Chicken Sprites.png`), 4-directional `draw_subsprite` animation with `timer` frame clocks, pooled `Chicken[6]` AI + `Startle` message, 2D camera tracking |
 
 ---
 
@@ -131,18 +142,18 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 
 ### v0.1 (Current Release)
 * [x] AST (Abstract Syntax Tree) Design
-* [x] Parser (using Parlot 2.3)
-* [x] Two-Pass Semantic Analysis, Type Checking & Static RAM Budget Validation
+* [x] Parser (using Parlot 2.3) & Multi-File `import` Module Loader
+* [x] Two-Pass Semantic Analysis, Type Checking, Explicit `entry:` State & Static RAM Budget Validation
 * [x] Modular C99 Code Generator (Static Arenas, Actor Pools, Generational Handles & Frame Mailbox)
+* [x] Compile-Time PNG Asset Baker (pure C# `.png` → static `RGBA4444` / `ABGR8888` C99 arrays)
 * [x] Modular STB-Style PSP C99 Runtime (`psps_arena`, `psps_types`, `psps_video`, `psps_input`, `psps_save`)
 * [x] Tilemaps, 2D Camera (`set_camera`, `draw_subsprite`, `draw_tilemap`), Embedded 8×8 Bitmap Font (`draw_text`, `draw_number`), and Save Data Persistence (`save_game` / `load_game` via `sceUtilitySavedata`)
 * [x] CLI Compiler & Podman/PSPSDK `EBOOT.PBP` Build Integration (`psp-prxgen` + `pack-pbp`)
 * [x] VS Code Syntax Highlighting Extension & Snippets
-* [x] Language Tutorial & Playable Pong Example (`examples/pong.psps`)
+* [x] Language Tutorial & Modular Examples (`examples/pong`, `examples/sprite`, `examples/anim`)
 
 ### Planned for v0.2+
-* [ ] Compile-Time Image & Audio Asset Baker (PNG → swizzled `RGBA4444`/`T8`, WAV → PCM)
-* [ ] PSP Audio Runtime Module (`psps_audio.h`)
+* [ ] Compile-Time Audio Asset Baker (WAV → PCM) & PSP Audio Runtime Module (`psps_audio.h`)
 * [ ] Language Server (LSP) for Real-Time VS Code Diagnostics & Autocomplete
 * [ ] Automated Unit & Integration Test Suite
 
