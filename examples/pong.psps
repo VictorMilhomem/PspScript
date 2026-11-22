@@ -1,0 +1,222 @@
+// ============================================================================
+// PSP Pong - Classic Arcade Pong for Sony PlayStation Portable (480x272)
+// ============================================================================
+
+game "PSP Pong" {
+    ram_budget: 16MB,
+    fps: 60
+}
+
+message PaddleBounce {
+    dir_x: f32,
+    offset_y: f32
+}
+
+level var player_score: int = 0
+level var cpu_score: int = 0
+global var last_winner_is_player: bool = true
+
+// Input bitmasks matching Runtime/psps_input.h (psps_button_t)
+global var BTN_CROSS: int = 1
+global var BTN_UP: int = 16
+global var BTN_DOWN: int = 32
+
+actor PlayerPaddle {
+    pos: vec2 = { 20.0, 108.0 }
+    size: vec2 = { 10.0, 56.0 }
+    speed: f32 = 190.0
+    tint: color = #00E5FF
+
+    update(dt: f32) {
+        if button_held(BTN_UP) {
+            pos.y -= speed * dt
+        }
+        if button_held(BTN_DOWN) {
+            pos.y += speed * dt
+        }
+        pos.y = clamp(pos.y, 16.0, 256.0 - size.y)
+    }
+
+    draw() {
+        draw_rect({ pos.x, pos.y, size.x, size.y }, tint)
+    }
+}
+
+actor CpuPaddle {
+    pos: vec2 = { 450.0, 108.0 }
+    size: vec2 = { 10.0, 56.0 }
+    speed: f32 = 160.0
+    track_y: f32 = 136.0
+    tint: color = #FF2A6D
+
+    update(dt: f32) {
+        var center_y: f32 = pos.y + (size.y * 0.5)
+        if track_y < center_y - 4.0 {
+            pos.y -= speed * dt
+        }
+        if track_y > center_y + 4.0 {
+            pos.y += speed * dt
+        }
+        pos.y = clamp(pos.y, 16.0, 256.0 - size.y)
+    }
+
+    draw() {
+        draw_rect({ pos.x, pos.y, size.x, size.y }, tint)
+    }
+}
+
+actor Ball[4] {
+    pos: vec2 = { 236.0, 132.0 }
+    vel: vec2 = { -180.0, 90.0 }
+    size: f32 = 8.0
+    serve_delay: timer = 0.75s
+    tint: color = #FFF275
+
+    on PaddleBounce(msg) {
+        var speed_x: f32 = clamp(abs(vel.x) * 1.06, 180.0, 340.0)
+        vel.x = speed_x * msg.dir_x
+        vel.y = clamp(vel.y + (msg.offset_y * 160.0), -230.0, 230.0)
+    }
+
+    update(dt: f32) {
+        if !serve_delay.elapsed() {
+            return
+        }
+
+        pos += vel * dt
+
+        // Bounce off top and bottom arena walls
+        if pos.y <= 16.0 {
+            pos.y = 16.0
+            vel.y = abs(vel.y)
+        }
+        if pos.y + size >= 256.0 {
+            pos.y = 256.0 - size
+            vel.y = -abs(vel.y)
+        }
+    }
+
+    draw() {
+        draw_rect({ pos.x, pos.y, size, size }, tint)
+    }
+}
+
+fn check_aabb(ax: f32, ay: f32, aw: f32, ah: f32, bx: f32, by: f32, bw: f32, bh: f32) -> bool {
+    return (ax < bx + bw) && (ax + aw > bx) && (ay < by + bh) && (ay + ah > by)
+}
+
+state Match {
+    init() {
+        PlayerPaddle.pos = { 20.0, 108.0 }
+        CpuPaddle.pos = { 450.0, 108.0 }
+        spawn Ball { pos: { 236.0, 132.0 }, vel: { -180.0, 95.0 } }
+    }
+
+    update(dt: f32) {
+        each b in Ball {
+            // Guide CPU paddle toward the active ball center
+            CpuPaddle.track_y = b.pos.y + (b.size * 0.5)
+
+            // Left paddle (Player) collision
+            if b.vel.x < 0.0 && check_aabb(
+                b.pos.x, b.pos.y, b.size, b.size,
+                PlayerPaddle.pos.x, PlayerPaddle.pos.y, PlayerPaddle.size.x, PlayerPaddle.size.y
+            ) {
+                b.pos.x = PlayerPaddle.pos.x + PlayerPaddle.size.x
+                var hit_offset: f32 = ((b.pos.y + b.size * 0.5) - (PlayerPaddle.pos.y + PlayerPaddle.size.y * 0.5)) / (PlayerPaddle.size.y * 0.5)
+                send(b, PaddleBounce { dir_x: 1.0, offset_y: hit_offset })
+            }
+
+            // Right paddle (CPU) collision
+            if b.vel.x > 0.0 && check_aabb(
+                b.pos.x, b.pos.y, b.size, b.size,
+                CpuPaddle.pos.x, CpuPaddle.pos.y, CpuPaddle.size.x, CpuPaddle.size.y
+            ) {
+                b.pos.x = CpuPaddle.pos.x - b.size
+                var hit_offset_cpu: f32 = ((b.pos.y + b.size * 0.5) - (CpuPaddle.pos.y + CpuPaddle.size.y * 0.5)) / (CpuPaddle.size.y * 0.5)
+                send(b, PaddleBounce { dir_x: -1.0, offset_y: hit_offset_cpu })
+            }
+
+            // Check left goal (CPU scored)
+            if b.pos.x + b.size < 0.0 {
+                cpu_score += 1
+                b.pos = { 236.0, 132.0 }
+                b.vel = { 180.0, 90.0 }
+                b.serve_delay = 750ms
+            }
+
+            // Check right goal (Player scored)
+            if b.pos.x > 480.0 {
+                player_score += 1
+                b.pos = { 236.0, 132.0 }
+                b.vel = { -180.0, -90.0 }
+                b.serve_delay = 750ms
+            }
+        }
+
+        if player_score >= 5 {
+            last_winner_is_player = true
+            goto GameOver
+        }
+        if cpu_score >= 5 {
+            last_winner_is_player = false
+            goto GameOver
+        }
+    }
+
+    draw() {
+        clear_screen(#0B1021)
+
+        // Top and bottom court borders
+        draw_rect({ 0.0, 10.0, 480.0, 4.0 }, #263859)
+        draw_rect({ 0.0, 258.0, 480.0, 4.0 }, #263859)
+
+        // Center dashed net
+        var net_y: f32 = 20.0
+        while net_y < 250.0 {
+            draw_rect({ 239.0, net_y, 2.0, 10.0 }, #263859)
+            net_y += 20.0
+        }
+
+        // Player score pips (top-left)
+        var p_idx: int = 0
+        while p_idx < player_score {
+            var px: f32 = 170.0 + (p_idx * 12)
+            draw_rect({ px, 22.0, 8.0, 8.0 }, #00E5FF)
+            p_idx += 1
+        }
+
+        // CPU score pips (top-right)
+        var c_idx: int = 0
+        while c_idx < cpu_score {
+            var cx: f32 = 250.0 + (c_idx * 12)
+            draw_rect({ cx, 22.0, 8.0, 8.0 }, #FF2A6D)
+            c_idx += 1
+        }
+    }
+
+    exit() {
+        each b in Ball {
+            destroy b
+        }
+    }
+}
+
+state GameOver {
+    rematch_timer: timer = 2.5s
+
+    update(dt: f32) {
+        if rematch_timer.elapsed() || button_pressed(BTN_CROSS) {
+            goto Match
+        }
+    }
+
+    draw() {
+        clear_screen(#070A14)
+        if last_winner_is_player {
+            draw_rect({ 160.0, 110.0, 160.0, 52.0 }, #00E5FF)
+        } else {
+            draw_rect({ 160.0, 110.0, 160.0, 52.0 }, #FF2A6D)
+        }
+    }
+}
