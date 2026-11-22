@@ -1,0 +1,112 @@
+{
+  "Game Config": {
+    "prefix": "game",
+    "body": [
+      "game \"${1:My PSP Game}\" {",
+      "\tram_budget: ${2:16MB},",
+      "\tfps: ${3:60}",
+      "}"
+    ],
+    "description": "Declare a PSPScript game configuration block"
+  },
+  "Singleton Actor": {
+    "prefix": "actor",
+    "body": [
+      "actor ${1:Player} {",
+      "\tpos: vec2 = { ${2:240.0}, ${3:136.0} }",
+      "",
+      "\tupdate(dt: f32) {",
+      "\t\t$0",
+      "\t}",
+      "",
+      "\tdraw() {",
+      "\t\t",
+      "\t}",
+      "}"
+    ],
+    "description": "Declare a singleton PSPScript actor"
+  },
+  "Pooled Actor": {
+    "prefix": "actorpool",
+    "body": [
+      "actor ${1:Enemy}[${2:32}] {",
+      "\tpos: vec2",
+      "\thp: int = ${3:100}",
+      "",
+      "\tupdate(dt: f32) {",
+      "\t\t$0",
+      "\t}",
+      "}"
+    ],
+    "description": "Declare a static-capacity pooled PSPScript actor"
+  },
+  "Game State": {
+    "prefix": "state",
+    "body": [
+      "state ${1:Gameplay} {",
+      "\tinit() {",
+      "\t\t$0",
+      "\t}",
+      "",
+      "\tupdate(dt: f32) {",
+      "\t\t",
+      "\t}",
+      "",
+      "\tdraw() {",
+      "\t\tclear_screen(#000000)",
+      "\t}",
+      "}"
+    ],
+    "description": "Declare a PSPScript game state"
+  },
+  "Message Declaration": {
+    "prefix": "message",
+    "body": [
+      "message ${1:Hit} {",
+      "\t${2:amount}: ${3:int}",
+      "}"
+    ],
+    "description": "Declare a typed PSPScript message"
+  },
+  "Message Handler": {
+    "prefix": "on",
+    "body": [
+      "on ${1:Hit}(${2:msg}) {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Add a message handler inside an actor"
+  },
+  "Pool Iteration (each)": {
+    "prefix": "each",
+    "body": [
+      "each ${1:item} in ${2:Enemy} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Iterate over all active instances in an actor pool"
+  },
+  "Send Message": {
+    "prefix": "send",
+    "body": [
+      "send(${1:target}, ${2:Hit} { ${3:amount}: ${4:10} })"
+    ],
+    "description": "Send a typed message to an actor handle"
+  },
+  "Spawn Actor": {
+    "prefix": "spawn",
+    "body": [
+      "var ${1:e} = spawn ${2:Enemy} { pos: { ${3:100.0}, ${4:100.0} } }"
+    ],
+    "description": "Spawn a new actor instance from a static pool"
+  },
+  "Function": {
+    "prefix": "fn",
+    "body": [
+      "fn ${1:helper}(${2:a}: ${3:f32}) -> ${4:void} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Declare a PSPScript function"
+  }
+}

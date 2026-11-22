@@ -1,0 +1,56 @@
+{
+  "name": "pspscript",
+  "displayName": "PSPScript",
+  "description": "Syntax highlighting, language configuration, and snippets for PSPScript (.psps) — PlayStation Portable homebrew scripting language.",
+  "version": "0.1.0",
+  "publisher": "pspscript",
+  "icon": "images/icon.png",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Snippets"
+  ],
+  "keywords": [
+    "pspscript",
+    "psp",
+    "playstation portable",
+    "homebrew",
+    "c99",
+    "gamedev"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "pspscript",
+        "aliases": [
+          "PSPScript",
+          "pspscript",
+          "psps"
+        ],
+        "extensions": [
+          ".psps"
+        ],
+        "configuration": "./language-configuration.json",
+        "icon": {
+          "light": "./images/icon.png",
+          "dark": "./images/icon.png"
+        }
+      }
+    ],
+    "grammars": [
+      {
+        "language": "pspscript",
+        "scopeName": "source.pspscript",
+        "path": "./syntaxes/pspscript.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "pspscript",
+        "path": "./snippets/pspscript.json"
+      }
+    ]
+  }
+}
