@@ -7,6 +7,10 @@ actor PlayerPaddle {
     tint: color = #00E5FF
 
     update(dt: f32) {
+        if !match_active {
+            return
+        }
+
         if button_held(BTN_UP) {
             pos.y -= speed * dt
         }
@@ -17,6 +21,10 @@ actor PlayerPaddle {
     }
 
     draw() {
+        if !match_active {
+            return
+        }
+
         draw_rect({ pos.x, pos.y, size.x, size.y }, tint)
     }
 }
@@ -29,6 +37,10 @@ actor CpuPaddle {
     tint: color = #FF2A6D
 
     update(dt: f32) {
+        if !match_active {
+            return
+        }
+
         var center_y: f32 = pos.y + (size.y * 0.5)
         if track_y < center_y - 4.0 {
             pos.y -= speed * dt
@@ -40,6 +52,10 @@ actor CpuPaddle {
     }
 
     draw() {
+        if !match_active {
+            return
+        }
+
         draw_rect({ pos.x, pos.y, size.x, size.y }, tint)
     }
 }

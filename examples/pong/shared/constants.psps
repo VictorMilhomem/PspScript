@@ -5,16 +5,28 @@ message PaddleBounce {
     offset_y: f32
 }
 
+message ButtonFocus {
+    focused_id: int
+}
+
+message ButtonPress {
+    confirmed: bool
+}
+
 // Persistent globals (saved via save_game() / load_game())
 global var player_wins: int = 0
 global var last_winner_is_player: bool = true
 global var save_loaded: bool = false
+global var cpu_difficulty: int = 1 // 0 = EASY, 1 = NORMAL, 2 = HARD
 
 // Input bitmasks matching Runtime/psps_input.h (psps_button_t)
 global var BTN_CROSS: int = 1
+global var BTN_CIRCLE: int = 2
 global var BTN_UP: int = 16
 global var BTN_DOWN: int = 32
+global var BTN_START: int = 1024
 
-// Level-scoped match scores (reset automatically on 'goto')
+// Level-scoped match state (reset automatically on 'goto')
 level var player_score: int = 0
 level var cpu_score: int = 0
+level var match_active: bool = false

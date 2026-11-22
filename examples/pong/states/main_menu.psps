@@ -1,0 +1,76 @@
+import "../shared/constants"
+import "../actors/button"
+
+state MainMenu {
+    selected_index: int = 0
+
+    init() {
+        if !save_loaded {
+            load_game()
+            save_loaded = true
+        }
+
+        selected_index = 0
+
+        spawn Button { pos: { 140.0, 112.0 }, width: 200, height: 28, action_id: 0, selected: true }
+        spawn Button { pos: { 140.0, 148.0 }, width: 200, height: 28, action_id: 1, selected: false }
+        spawn Button { pos: { 140.0, 184.0 }, width: 200, height: 28, action_id: 2, selected: false }
+    }
+
+    update(dt: f32) {
+        var focus_changed: bool = false
+
+        if button_pressed(BTN_UP) {
+            selected_index -= 1
+            if selected_index < 0 {
+                selected_index = 2
+            }
+            focus_changed = true
+        }
+
+        if button_pressed(BTN_DOWN) {
+            selected_index += 1
+            if selected_index > 2 {
+                selected_index = 0
+            }
+            focus_changed = true
+        }
+
+        if focus_changed {
+            each btn in Button {
+                send(btn, ButtonFocus { focused_id: selected_index })
+            }
+        }
+
+        if button_pressed(BTN_CROSS) || button_pressed(BTN_START) {
+            each btn in Button {
+                send(btn, ButtonPress { confirmed: true })
+            }
+        }
+    }
+
+    draw() {
+        clear_screen(#070A14)
+
+        // Decorative top/bottom frame bars
+        draw_rect({ 0.0, 10.0, 480.0, 4.0 }, #00E5FF)
+        draw_rect({ 0.0, 258.0, 480.0, 4.0 }, #FF2A6D)
+
+        // Title banner
+        draw_text("PSP PONG", { 144.0, 34.0 }, #00E5FF, 3)
+        draw_text("PLAYSTATION PORTABLE HOMEBREW", { 124.0, 68.0 }, #8899AA, 1)
+
+        // Persistent wins readout
+        draw_text("TOTAL WINS:", { 184.0, 88.0 }, #FFFFFF, 1)
+        draw_number(player_wins, { 280.0, 88.0 }, #FFF275, 1)
+
+        // Controls footer
+        draw_text("UP/DOWN: MOVE   X: SELECT", { 140.0, 234.0 }, #556677, 1)
+    }
+
+    exit() {
+        each btn in Button {
+            destroy btn
+        }
+    }
+}

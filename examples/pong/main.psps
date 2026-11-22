@@ -5,12 +5,14 @@
 game "PSP Pong" {
     ram_budget: 16MB,
     fps: 60,
-    entry: Match
+    entry: MainMenu
 }
 
 import "shared/constants.psps"
 import "shared/math.psps"
+import "actors/button.psps"
 import "actors/paddles.psps"
 import "actors/ball.psps"
+import "states/main_menu.psps"
 import "states/match.psps"
 import "states/game_over.psps"

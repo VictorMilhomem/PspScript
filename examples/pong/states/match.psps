@@ -10,8 +10,18 @@ state Match {
             save_loaded = true
         }
 
+        match_active = true
         PlayerPaddle.pos = { 20.0, 108.0 }
         CpuPaddle.pos = { 450.0, 108.0 }
+
+        if cpu_difficulty == 0 {
+            CpuPaddle.speed = 120.0
+        } else if cpu_difficulty == 1 {
+            CpuPaddle.speed = 160.0
+        } else {
+            CpuPaddle.speed = 215.0
+        }
+
         spawn Ball { pos: { 236.0, 132.0 }, vel: { -180.0, 95.0 } }
     }
 
