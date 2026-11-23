@@ -77,12 +77,16 @@ public sealed class SemanticAnalyzer
                         break;
 
                     var assetType = new AssetType(asset.AssetKind);
+                    bool isMutable = asset.Options.Any(static opt =>
+                        string.Equals(opt.Name, "mutable", StringComparison.OrdinalIgnoreCase) &&
+                        opt.Value is BooleanLiteralExpr { Value: true });
                     _symbols.Assets[asset.Name] = new AssetSymbol(
                         asset.Name,
                         asset.AssetKind,
                         asset.FilePath,
                         assetType,
-                        asset
+                        asset,
+                        isMutable
                     );
                     _model.RecordType(asset, assetType);
                     break;
@@ -604,15 +608,7 @@ public sealed class SemanticAnalyzer
             switch (decl)
             {
                 case AssetDecl asset:
-                    foreach (var opt in asset.Options)
-                    {
-                        ResolvedType optType = opt.Value is IdentifierExpr optId &&
-                                               !_symbols.Globals.ContainsKey(optId.Name) &&
-                                               !_symbols.Assets.ContainsKey(optId.Name)
-                            ? _model.RecordType(opt.Value, ResolvedType.String)
-                            : ResolveExpr(opt.Value, rootScope, expectedType: null);
-                        _model.RecordType(opt, optType);
-                    }
+                    ValidateAssetOptions(asset, rootScope);
                     break;
 
                 case GlobalVarDecl gvar when _symbols.Globals.TryGetValue(gvar.Name, out var gvarSym):
@@ -643,6 +639,84 @@ public sealed class SemanticAnalyzer
                     ValidateFunctionBody(fn, fnSym, rootScope);
                     break;
             }
+        }
+    }
+
+    private void ValidateAssetOptions(AssetDecl asset, LexicalScope rootScope)
+    {
+        foreach (var opt in asset.Options)
+        {
+            if (string.Equals(asset.AssetKind, "tilemap", StringComparison.Ordinal))
+            {
+                if (string.Equals(opt.Name, "tileset", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (opt.Value is IdentifierExpr tsId &&
+                        _symbols.Assets.TryGetValue(tsId.Name, out var tsSym))
+                    {
+                        if (!string.Equals(tsSym.AssetKind, "texture", StringComparison.Ordinal))
+                        {
+                            ReportError(
+                                $"Tilemap '{asset.Name}' option 'tileset' must reference a 'texture' asset, got '{tsSym.AssetKind}'.",
+                                opt.Span
+                            );
+                        }
+                        _model.RecordType(opt.Value, tsSym.Type);
+                        _model.RecordType(opt, tsSym.Type);
+                    }
+                    else
+                    {
+                        ReportError(
+                            $"Tilemap '{asset.Name}' option 'tileset' must reference a declared 'texture' asset.",
+                            opt.Span
+                        );
+                        _model.RecordType(opt, ResolvedType.Error);
+                    }
+                    continue;
+                }
+
+                if (string.Equals(opt.Name, "mutable", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (opt.Value is not BooleanLiteralExpr)
+                    {
+                        ReportError(
+                            $"Tilemap '{asset.Name}' option 'mutable' must be a boolean literal ('true' or 'false').",
+                            opt.Span
+                        );
+                        _model.RecordType(opt, ResolvedType.Error);
+                    }
+                    else
+                    {
+                        _model.RecordType(opt.Value, ResolvedType.Bool);
+                        _model.RecordType(opt, ResolvedType.Bool);
+                    }
+                    continue;
+                }
+
+                if (string.Equals(opt.Name, "collision_layer", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (opt.Value is not StringLiteralExpr)
+                    {
+                        ReportError(
+                            $"Tilemap '{asset.Name}' option 'collision_layer' must be a string literal.",
+                            opt.Span
+                        );
+                        _model.RecordType(opt, ResolvedType.Error);
+                    }
+                    else
+                    {
+                        _model.RecordType(opt.Value, ResolvedType.String);
+                        _model.RecordType(opt, ResolvedType.String);
+                    }
+                    continue;
+                }
+            }
+
+            ResolvedType optType = opt.Value is IdentifierExpr optId &&
+                                   !_symbols.Globals.ContainsKey(optId.Name) &&
+                                   !_symbols.Assets.ContainsKey(optId.Name)
+                ? _model.RecordType(opt.Value, ResolvedType.String)
+                : ResolveExpr(opt.Value, rootScope, expectedType: null);
+            _model.RecordType(opt, optType);
         }
     }
 
@@ -1258,6 +1332,12 @@ public sealed class SemanticAnalyzer
             if (ownerType == ResolvedType.Rect && fieldAccess.FieldName == "center")
             {
                 propertyName = "rect.center";
+                return true;
+            }
+            if (ownerType is AssetType { AssetKind: "tilemap" } &&
+                fieldAccess.FieldName is "cols" or "rows" or "tile_size" or "layer_count")
+            {
+                propertyName = $"tilemap.{fieldAccess.FieldName}";
                 return true;
             }
             current = fieldAccess.Target;
@@ -1935,6 +2015,11 @@ public sealed class SemanticAnalyzer
                 if (field is "len" or "length" or "capacity")
                     return ResolvedType.Int;
                 break;
+
+            case AssetType { AssetKind: "tilemap" }:
+                if (field is "cols" or "rows" or "tile_size" or "layer_count")
+                    return ResolvedType.Int;
+                break;
         }
 
         ReportError($"Type '{targetType}' does not contain a field named '{field}'.", fieldExpr.Span);
@@ -2141,6 +2226,171 @@ public sealed class SemanticAnalyzer
                     }
                     _model.RecordType(memberAccess, new FunctionType([ResolvedType.Vec2], ResolvedType.Bool));
                     return ResolvedType.Bool;
+            }
+        }
+
+        // Built-in methods on 'tilemap' assets
+        if (receiverType is AssetType { AssetKind: "tilemap" })
+        {
+            bool isMutable = memberAccess.Target is IdentifierExpr mapId &&
+                             _symbols.Assets.TryGetValue(mapId.Name, out var mapSym) &&
+                             mapSym.IsMutable;
+            string mapDisplayName = memberAccess.Target is IdentifierExpr idDisp ? idDisp.Name : "tilemap";
+
+            switch (methodName)
+            {
+                case "draw":
+                    if (callExpr.Arguments.Count > 1)
+                    {
+                        ReportError($"Method 'tilemap.draw([origin])' takes 0 or 1 argument, got {callExpr.Arguments.Count}.", callExpr.Span);
+                        foreach (var arg in callExpr.Arguments)
+                            ResolveExpr(arg, scope, expectedType: null);
+                    }
+                    else if (callExpr.Arguments.Count == 1)
+                    {
+                        var argType = ResolveExpr(callExpr.Arguments[0], scope, expectedType: ResolvedType.Vec2);
+                        if (!ResolvedType.IsAssignableTo(argType, ResolvedType.Vec2))
+                            ReportError($"Argument 'origin' to 'tilemap.draw' must be 'vec2', got '{argType}'.", callExpr.Arguments[0].Span);
+                    }
+                    _model.RecordType(memberAccess, new FunctionType([], ResolvedType.Void));
+                    return ResolvedType.Void;
+
+                case "draw_layer":
+                    if (callExpr.Arguments.Count is < 1 or > 2)
+                    {
+                        ReportError($"Method 'tilemap.draw_layer(layer[, origin])' takes 1 or 2 arguments, got {callExpr.Arguments.Count}.", callExpr.Span);
+                        foreach (var arg in callExpr.Arguments)
+                            ResolveExpr(arg, scope, expectedType: null);
+                    }
+                    else
+                    {
+                        var layerType = ResolveExpr(callExpr.Arguments[0], scope, expectedType: ResolvedType.Int);
+                        if (!layerType.IsError && !layerType.IsInteger)
+                            ReportError($"Argument 'layer' to 'tilemap.draw_layer' must be an integer, got '{layerType}'.", callExpr.Arguments[0].Span);
+
+                        if (callExpr.Arguments.Count == 2)
+                        {
+                            var originType = ResolveExpr(callExpr.Arguments[1], scope, expectedType: ResolvedType.Vec2);
+                            if (!ResolvedType.IsAssignableTo(originType, ResolvedType.Vec2))
+                                ReportError($"Argument 'origin' to 'tilemap.draw_layer' must be 'vec2', got '{originType}'.", callExpr.Arguments[1].Span);
+                        }
+                    }
+                    _model.RecordType(memberAccess, new FunctionType([ResolvedType.Int], ResolvedType.Void));
+                    return ResolvedType.Void;
+
+                case "get_tile":
+                    if (callExpr.Arguments.Count != 3)
+                    {
+                        ReportError($"Method 'tilemap.get_tile(layer, col, row)' takes 3 arguments, got {callExpr.Arguments.Count}.", callExpr.Span);
+                        foreach (var arg in callExpr.Arguments)
+                            ResolveExpr(arg, scope, expectedType: null);
+                    }
+                    else
+                    {
+                        for (int i = 0; i < 3; i++)
+                        {
+                            var t = ResolveExpr(callExpr.Arguments[i], scope, expectedType: ResolvedType.Int);
+                            if (!t.IsError && !t.IsInteger)
+                                ReportError($"Argument {i + 1} to 'tilemap.get_tile' must be an integer, got '{t}'.", callExpr.Arguments[i].Span);
+                        }
+                    }
+                    _model.RecordType(memberAccess, new FunctionType([ResolvedType.Int, ResolvedType.Int, ResolvedType.Int], ResolvedType.Int));
+                    return ResolvedType.Int;
+
+                case "is_solid":
+                    if (callExpr.Arguments.Count != 2)
+                    {
+                        ReportError($"Method 'tilemap.is_solid(col, row)' takes 2 arguments, got {callExpr.Arguments.Count}.", callExpr.Span);
+                        foreach (var arg in callExpr.Arguments)
+                            ResolveExpr(arg, scope, expectedType: null);
+                    }
+                    else
+                    {
+                        for (int i = 0; i < 2; i++)
+                        {
+                            var t = ResolveExpr(callExpr.Arguments[i], scope, expectedType: ResolvedType.Int);
+                            if (!t.IsError && !t.IsInteger)
+                                ReportError($"Argument {i + 1} to 'tilemap.is_solid' must be an integer, got '{t}'.", callExpr.Arguments[i].Span);
+                        }
+                    }
+                    _model.RecordType(memberAccess, new FunctionType([ResolvedType.Int, ResolvedType.Int], ResolvedType.Bool));
+                    return ResolvedType.Bool;
+
+                case "collides_rect":
+                    if (callExpr.Arguments.Count != 1)
+                    {
+                        ReportError($"Method 'tilemap.collides_rect(hitbox)' takes 1 argument, got {callExpr.Arguments.Count}.", callExpr.Span);
+                        foreach (var arg in callExpr.Arguments)
+                            ResolveExpr(arg, scope, expectedType: null);
+                    }
+                    else
+                    {
+                        var argType = ResolveExpr(callExpr.Arguments[0], scope, expectedType: ResolvedType.Rect);
+                        if (!ResolvedType.IsAssignableTo(argType, ResolvedType.Rect))
+                            ReportError($"Argument to 'tilemap.collides_rect' must be 'rect', got '{argType}'.", callExpr.Arguments[0].Span);
+                    }
+                    _model.RecordType(memberAccess, new FunctionType([ResolvedType.Rect], ResolvedType.Bool));
+                    return ResolvedType.Bool;
+
+                case "set_tile":
+                    if (!isMutable)
+                        ReportError($"Cannot call 'set_tile' on read-only tilemap '{mapDisplayName}'. Declare it with 'mutable: true'.", callExpr.Span);
+
+                    if (callExpr.Arguments.Count != 4)
+                    {
+                        ReportError($"Method 'tilemap.set_tile(layer, col, row, tile_id)' takes 4 arguments, got {callExpr.Arguments.Count}.", callExpr.Span);
+                        foreach (var arg in callExpr.Arguments)
+                            ResolveExpr(arg, scope, expectedType: null);
+                    }
+                    else
+                    {
+                        for (int i = 0; i < 4; i++)
+                        {
+                            var t = ResolveExpr(callExpr.Arguments[i], scope, expectedType: ResolvedType.Int);
+                            if (!t.IsError && !t.IsInteger)
+                                ReportError($"Argument {i + 1} to 'tilemap.set_tile' must be an integer, got '{t}'.", callExpr.Arguments[i].Span);
+                        }
+                    }
+                    _model.RecordType(memberAccess, new FunctionType([ResolvedType.Int, ResolvedType.Int, ResolvedType.Int, ResolvedType.Int], ResolvedType.Void));
+                    return ResolvedType.Void;
+
+                case "set_solid":
+                    if (!isMutable)
+                        ReportError($"Cannot call 'set_solid' on read-only tilemap '{mapDisplayName}'. Declare it with 'mutable: true'.", callExpr.Span);
+
+                    if (callExpr.Arguments.Count != 3)
+                    {
+                        ReportError($"Method 'tilemap.set_solid(col, row, solid)' takes 3 arguments, got {callExpr.Arguments.Count}.", callExpr.Span);
+                        foreach (var arg in callExpr.Arguments)
+                            ResolveExpr(arg, scope, expectedType: null);
+                    }
+                    else
+                    {
+                        for (int i = 0; i < 2; i++)
+                        {
+                            var t = ResolveExpr(callExpr.Arguments[i], scope, expectedType: ResolvedType.Int);
+                            if (!t.IsError && !t.IsInteger)
+                                ReportError($"Argument {i + 1} to 'tilemap.set_solid' must be an integer, got '{t}'.", callExpr.Arguments[i].Span);
+                        }
+                        var solidType = ResolveExpr(callExpr.Arguments[2], scope, expectedType: ResolvedType.Bool);
+                        if (!solidType.IsError && solidType != ResolvedType.Bool)
+                            ReportError($"Argument 'solid' to 'tilemap.set_solid' must be 'bool', got '{solidType}'.", callExpr.Arguments[2].Span);
+                    }
+                    _model.RecordType(memberAccess, new FunctionType([ResolvedType.Int, ResolvedType.Int, ResolvedType.Bool], ResolvedType.Void));
+                    return ResolvedType.Void;
+
+                case "reset":
+                    if (!isMutable)
+                        ReportError($"Cannot call 'reset' on read-only tilemap '{mapDisplayName}'. Declare it with 'mutable: true'.", callExpr.Span);
+
+                    if (callExpr.Arguments.Count != 0)
+                    {
+                        ReportError($"Method 'tilemap.reset()' takes 0 arguments, got {callExpr.Arguments.Count}.", callExpr.Span);
+                        foreach (var arg in callExpr.Arguments)
+                            ResolveExpr(arg, scope, expectedType: null);
+                    }
+                    _model.RecordType(memberAccess, new FunctionType([], ResolvedType.Void));
+                    return ResolvedType.Void;
             }
         }
 

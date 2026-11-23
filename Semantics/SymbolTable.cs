@@ -7,7 +7,8 @@ public sealed record AssetSymbol(
     string AssetKind,
     string FilePath,
     AssetType Type,
-    AssetDecl Declaration
+    AssetDecl Declaration,
+    bool IsMutable = false
 );
 
 public sealed record FieldSymbol(

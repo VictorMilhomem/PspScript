@@ -201,6 +201,12 @@ public sealed partial class CCodeGenerator
             return fixedArr.Length.ToString(CultureInfo.InvariantCulture);
         }
 
+        if (targetType is AssetType { AssetKind: "tilemap" } &&
+            field is "cols" or "rows" or "tile_size" or "layer_count")
+        {
+            return $"(int32_t)({EmitExpr(fieldExpr.Target, ctx)}.{field})";
+        }
+
         return $"{EmitExpr(fieldExpr.Target, ctx)}.{field}";
     }
 
@@ -246,6 +252,34 @@ public sealed partial class CCodeGenerator
                     "contains" when callExpr.Arguments.Count == 1 =>
                         $"psps_rect_contains({receiverExpr}, {EmitExpr(callExpr.Arguments[0], ctx)})",
                     _ => "false"
+                };
+            }
+
+            if (receiverType is AssetType { AssetKind: "tilemap" })
+            {
+                return method switch
+                {
+                    "draw" when callExpr.Arguments.Count == 0 =>
+                        $"psps_baked_tilemap_draw(&({receiverExpr}), vec2_make(0.0f, 0.0f))",
+                    "draw" when callExpr.Arguments.Count == 1 =>
+                        $"psps_baked_tilemap_draw(&({receiverExpr}), {EmitExpr(callExpr.Arguments[0], ctx)})",
+                    "draw_layer" when callExpr.Arguments.Count == 1 =>
+                        $"psps_baked_tilemap_draw_layer(&({receiverExpr}), (int32_t)({EmitExpr(callExpr.Arguments[0], ctx)}), vec2_make(0.0f, 0.0f))",
+                    "draw_layer" when callExpr.Arguments.Count == 2 =>
+                        $"psps_baked_tilemap_draw_layer(&({receiverExpr}), (int32_t)({EmitExpr(callExpr.Arguments[0], ctx)}), {EmitExpr(callExpr.Arguments[1], ctx)})",
+                    "get_tile" when callExpr.Arguments.Count == 3 =>
+                        $"psps_baked_tilemap_get_tile(&({receiverExpr}), (int32_t)({EmitExpr(callExpr.Arguments[0], ctx)}), (int32_t)({EmitExpr(callExpr.Arguments[1], ctx)}), (int32_t)({EmitExpr(callExpr.Arguments[2], ctx)}))",
+                    "set_tile" when callExpr.Arguments.Count == 4 =>
+                        $"psps_baked_tilemap_set_tile(&({receiverExpr}), (int32_t)({EmitExpr(callExpr.Arguments[0], ctx)}), (int32_t)({EmitExpr(callExpr.Arguments[1], ctx)}), (int32_t)({EmitExpr(callExpr.Arguments[2], ctx)}), (int32_t)({EmitExpr(callExpr.Arguments[3], ctx)}))",
+                    "is_solid" when callExpr.Arguments.Count == 2 =>
+                        $"psps_baked_tilemap_is_solid(&({receiverExpr}), (int32_t)({EmitExpr(callExpr.Arguments[0], ctx)}), (int32_t)({EmitExpr(callExpr.Arguments[1], ctx)}))",
+                    "set_solid" when callExpr.Arguments.Count == 3 =>
+                        $"psps_baked_tilemap_set_solid(&({receiverExpr}), (int32_t)({EmitExpr(callExpr.Arguments[0], ctx)}), (int32_t)({EmitExpr(callExpr.Arguments[1], ctx)}), {EmitExpr(callExpr.Arguments[2], ctx)})",
+                    "collides_rect" when callExpr.Arguments.Count == 1 =>
+                        $"psps_baked_tilemap_collides_rect(&({receiverExpr}), {EmitExpr(callExpr.Arguments[0], ctx)})",
+                    "reset" =>
+                        $"psps_baked_tilemap_reset(&({receiverExpr}))",
+                    _ => "(void)0"
                 };
             }
 

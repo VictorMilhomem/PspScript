@@ -35,6 +35,7 @@ PSPScript **v0.2** streamlines everyday PSP game code with unified `for` loops, 
 | **Standard Library** | Manual boilerplate for button bitmasks & 2D shapes | Bundled zero-allocation `StdLib/input.psps` (`BTN_*`, `dpad_vector()`) and `StdLib/collision.psps` (`AABB`, `Circle`) |
 | **`rect` Geometry** | Manual AABB math (`check_aabb(...)`) | Built-in `r.overlaps(other)`, `r.contains(point)`, and read-only `r.center` |
 | **Enums & `match`** | Integer constants + `if`/`else if` chains | First-class nominal `enum` (`Season.Spring`) and exhaustive `match` statements |
+| **Baked Tilemaps** | Manual `[N]u8` arrays + `draw_tilemap(...)` | Compile-time Tiled (`.tmx`/`.tmj`) baking via `asset map = tilemap(...)` with multi-layer draw, collision queries, and opt-in `mutable: true` |
 | **Imported Assets** | Resolved relative to entry directory only | Resolves relative to the declaring file first, then falls back to entry directory |
 
 ### Quick Migration Examples
@@ -663,6 +664,49 @@ state Overworld {
 
 - **PSP Hardware (`__PSP__`)**: `save_game()` and `load_game()` invoke `sceUtilitySavedata` (`PSP_UTILITY_SAVEDATA_AUTOSAVE` / `AUTOLOAD`) to persist `DATA.BIN` under `ms0:/PSP/SAVEDATA/`.
 - **Desktop Preview**: The same checksummed binary format is saved to `savedata/<GAME_ID>.bin` for local testing.
+
+### Compile-Time Baked Tiled Tilemaps (`.tmx` / `.tmj`)
+
+For full levels authored in [Tiled](https://www.mapeditor.org/), declare a `tilemap` asset. PSPScript bakes all visible tile layers (`uint16_t` cells with 14-bit tile IDs + H/V flip flags) and a compact collision grid (from a `"Collision"` layer and/or tiles with a `solid = true` boolean property) directly into static C99 arrays at compile time:
+
+```pspscript
+// Share an explicit texture across multiple maps (saves PSP VRAM)
+asset world_sheet = texture("tiles.png", format: ABGR8888)
+asset level1 = tilemap("maps/level1.tmx", tileset: world_sheet)
+
+// Or auto-bake the tileset PNG from Tiled + enable runtime tile edits (auto-reset on 'goto')
+asset farm = tilemap("maps/farm.tmj", mutable: true, collision_layer: "Collision")
+
+state Overworld {
+    player_box: rect = { 32.0, 32.0, 14.0, 14.0 }
+
+    update(dt: f32) {
+        if !farm.collides_rect(player_box) {
+            // Safe to move...
+        }
+        farm.set_tile(0, 2, 2, 5)
+    }
+
+    draw() {
+        set_camera_enabled(true)
+        farm.draw_layer(0)   // Ground layer
+        // Draw actors here...
+        farm.draw_layer(1)   // Foreground layer
+    }
+}
+```
+
+| Member | Signature / Type | Description |
+| :--- | :--- | :--- |
+| `.cols`, `.rows`, `.tile_size`, `.layer_count` | `int` (read-only) | Compile-time map dimensions |
+| `.draw([origin])` | `void` | Draws all visible non-collision layers with 480×272 camera culling |
+| `.draw_layer(layer[, origin])` | `void` | Draws a single layer (supports H/V tile flips) |
+| `.get_tile(layer, col, row)` | `int` | Bounds-checked tile ID lookup (`0` = empty or out of bounds) |
+| `.is_solid(col, row)` | `bool` | Bounds-checked collision grid lookup |
+| `.collides_rect(hitbox)` | `bool` | Returns `true` if any tile overlapped by `hitbox: rect` is solid |
+| `.set_tile(layer, col, row, id)` | `void` | Mutates tile cell at runtime (requires `mutable: true`) |
+| `.set_solid(col, row, solid)` | `void` | Mutates collision cell at runtime (requires `mutable: true`) |
+| `.reset()` | `void` | Restores writable `.bss` map from `.rodata` template (requires `mutable: true`; also runs automatically on `goto`) |
 
 ### Spritesheet Animation (`draw_subsprite` + `timer`)
 
