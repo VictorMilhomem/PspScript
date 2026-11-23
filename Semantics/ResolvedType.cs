@@ -138,6 +138,11 @@ public sealed record StructType(string Name) : ResolvedType
     public override string DisplayName => Name;
 }
 
+public sealed record EnumType(string Name) : ResolvedType
+{
+    public override string DisplayName => Name;
+}
+
 
 public sealed record MessageType(string Name) : ResolvedType
 {

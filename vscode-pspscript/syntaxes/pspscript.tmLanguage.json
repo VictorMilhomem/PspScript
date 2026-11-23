@@ -58,7 +58,7 @@
     "declarations": {
       "patterns": [
         {
-          "match": "\\b(actor|state|message|struct)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "match": "\\b(actor|state|message|struct|enum)\\s+([A-Za-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": { "name": "storage.type.declaration.pspscript" },
             "2": { "name": "entity.name.type.pspscript" }
@@ -171,7 +171,7 @@
         },
         {
           "name": "keyword.control.flow.pspscript",
-          "match": "\\b(if|else|for|each|in|break|return|goto)\\b"
+          "match": "\\b(if|else|match|for|each|in|break|return|goto)\\b"
         },
         {
           "name": "keyword.control.actor.pspscript",

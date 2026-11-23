@@ -5,6 +5,7 @@ TopDecl        ::= ImportDecl
                  | AssetDecl
                  | MessageDecl
                  | StructDecl
+                 | EnumDecl
                  | ActorDecl
                  | StateDecl
                  | GlobalVarDecl
@@ -28,6 +29,9 @@ MessageDecl    ::= "message" IDENT "{" FieldList? "}"
 
 // Passive data structures (values)
 StructDecl     ::= "struct" IDENT "{" FieldList? "}"
+
+// Nominal enumerated types (compile to C99 typedef enum)
+EnumDecl       ::= "enum" IDENT "{" (IDENT ("," IDENT)* ","?)? "}"
 
 // Actors with static capacity defined on the type (pool) or singleton (no brackets)
 ActorDecl      ::= "actor" IDENT ("[" INT "]")? "{" ActorMember* "}"
@@ -67,6 +71,7 @@ Block          ::= "{" Stmt* "}"
 Stmt           ::= LocalVarDecl
                  | AssignStmt
                  | IfStmt
+                 | MatchStmt
                  | ForStmt
                  | ForRangeStmt
                  | ForEachStmt
@@ -96,6 +101,9 @@ ForEachStmt    ::= "each" IDENT "in" IDENT Block
 // E.g.: each b in Bullet { ... }
 
 IfStmt         ::= "if" Expr Block ("else" (IfStmt | Block))?
+MatchStmt      ::= "match" Expr "{" MatchArm* "}"
+MatchArm       ::= MatchPattern "=>" (Block | Stmt) ","?
+MatchPattern   ::= "_" | IDENT "." IDENT | "-"? INT
 ForStmt        ::= "for" Expr Block
 ForRangeStmt   ::= "for" IDENT "in" Expr ".." Expr Block
 BreakStmt      ::= "break"

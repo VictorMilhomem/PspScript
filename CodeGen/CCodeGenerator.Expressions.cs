@@ -160,6 +160,12 @@ public sealed partial class CCodeGenerator
 
     private string EmitFieldAccessExpr(FieldAccessExpr fieldExpr, EmissionContext ctx)
     {
+        if (fieldExpr.Target is IdentifierExpr enumId &&
+            _symbols.Enums.ContainsKey(enumId.Name))
+        {
+            return $"{enumId.Name}_{fieldExpr.FieldName}";
+        }
+
         var targetType = _model.GetTypeOrDefault(fieldExpr.Target);
         string field = fieldExpr.FieldName;
 

@@ -34,6 +34,7 @@ PSPScript **v0.2** streamlines everyday PSP game code with unified `for` loops, 
 | **Imports** | Relative paths only (`import "shared/math.psps"`) | Adds bare module imports (`import input`, `import collision`, `import "collision"`) with local override & `StdLib/` fallback |
 | **Standard Library** | Manual boilerplate for button bitmasks & 2D shapes | Bundled zero-allocation `StdLib/input.psps` (`BTN_*`, `dpad_vector()`) and `StdLib/collision.psps` (`AABB`, `Circle`) |
 | **`rect` Geometry** | Manual AABB math (`check_aabb(...)`) | Built-in `r.overlaps(other)`, `r.contains(point)`, and read-only `r.center` |
+| **Enums & `match`** | Integer constants + `if`/`else if` chains | First-class nominal `enum` (`Season.Spring`) and exhaustive `match` statements |
 | **Imported Assets** | Resolved relative to entry directory only | Resolves relative to the declaring file first, then falls back to entry directory |
 
 ### Quick Migration Examples
@@ -270,6 +271,21 @@ struct Stats {
 }
 ```
 
+### Enumerated Types (`enum`)
+
+Enums define nominal, type-safe sets of named variants (4 bytes / `int32_t` in C99). Different enum types and `int` cannot be mixed implicitly, and uninitialized enum variables default to their first variant (`0`):
+
+```pspscript
+enum Season {
+    Spring,
+    Summer,
+    Fall,
+    Winter
+}
+
+global var current_season: Season = Season.Spring
+```
+
 ### Compile-Time Assets (`asset`)
 
 Assets declare PNG textures or spritesheets that are decoded at **compile time** by `AssetBaker.cs` and embedded directly into static C99 pixel arrays—requiring zero runtime file I/O or heap allocation on PSP:
@@ -475,12 +491,26 @@ fn wait_until_edge(x: f32) -> f32 {
 ```
 
 - `if condition { ... } else if other { ... } else { ... }`
+- `match value { Pattern => stmt_or_block, _ => ... }` — exhaustive pattern matching over `enum` or integer types (lowers to C99 `switch`). Every variant of an `enum` must be handled unless a `_` wildcard arm is present; integer `match` statements always require `_`.
 - `for condition { ... }` — Go-style conditional loop (`condition` must be `bool`)
 - `for i in start..end { ... }` — exclusive integer range loop (`i` is an immutable, block-scoped `int`)
 - `each item in PoolName { ... }` — safe active-slot iteration over actor pools
 - `break` — exits the innermost `for` or `each` loop immediately
 - `return` or `return expr` (non-void functions must return a value on all code paths)
 - Functions without `-> Type` default to `void`.
+
+```pspscript
+fn season_speed(s: Season) -> f32 {
+    match s {
+        Season.Spring => return 1.0,
+        Season.Summer => {
+            return 1.2
+        },
+        Season.Fall => return 0.9,
+        Season.Winter => return 0.6
+    }
+}
+```
 
 ---
 

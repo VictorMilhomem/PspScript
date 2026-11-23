@@ -24,6 +24,7 @@ internal static class CTypeMapper
         ActorRefType => "psps_ref_t",
         AssetType => "psps_texture_t",
         StructType st => $"{st.Name}_t",
+        EnumType en => $"{en.Name}_t",
         MessageType msg => $"Msg_{msg.Name}_t",
         FixedArrayType arr => FormatCType(arr.ElementType),
         _ => "int32_t"
@@ -65,6 +66,7 @@ internal static class CTypeMapper
         PrimitiveType { Kind: PrimitiveKind.Timer } => "psps_timer_make(0.0f)",
         ActorRefType => "PSPS_NULL_REF",
         StructType st => $"({st.Name}_t){{ 0 }}",
+        EnumType en => $"({en.Name}_t)0",
         _ => "0"
     };
 

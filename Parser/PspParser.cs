@@ -12,12 +12,12 @@ public static class PspParser
 
     private static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
     {
-        "import", "game", "asset", "message", "struct", "actor", "state",
+        "import", "game", "asset", "message", "struct", "enum", "actor", "state",
         "global", "level", "temp", "var", "fn",
         "init", "update", "draw", "exit", "on",
         "int", "u8", "u16", "u32", "f32", "bool", "void",
         "vec2", "vec3", "rect", "color", "timer", "ref",
-        "if", "else", "for", "each", "in", "break", "return",
+        "if", "else", "match", "for", "each", "in", "break", "return",
         "send", "spawn", "destroy", "goto",
         "true", "false", "null", "self"
     };
@@ -339,6 +339,36 @@ public static class PspParser
             )
             .Then(static (context, x) => new IfStmt(x.Item1, x.Item2, x.Item3));
 
+        // match scrutinee { Pattern => stmt_or_block, _ => ... }
+        var wildcardPattern = Keyword("_")
+            .Then<MatchPattern>(static (context, _) => new WildcardPattern());
+
+        var enumVariantPattern = identifier
+            .AndSkip(Terms.Char('.'))
+            .And(identifier.ElseError("Expected enum variant name after '.'"))
+            .Then<MatchPattern>(static (context, x) => new EnumVariantPattern(x.Item1, x.Item2));
+
+        var signedIntPattern = Terms.Char('-').ThenElse(static (_, _) => true, false)
+            .And(intLiteral)
+            .Then<MatchPattern>(static (context, x) => new IntLiteralPattern(x.Item1 ? -x.Item2 : x.Item2));
+
+        var matchPattern = OneOf(wildcardPattern, enumVariantPattern, signedIntPattern);
+
+        var matchArm = matchPattern
+            .AndSkip(Terms.Text("=>").ElseError("Expected '=>' after match pattern"))
+            .And(OneOf(blockStmt.Then<Stmt>(static (context, b) => b), stmt))
+            .AndSkip(ZeroOrOne(Terms.Char(',')))
+            .Then(static (context, x) => new MatchArm(x.Item1, x.Item2));
+
+        var matchStmt = Keyword("match")
+            .SkipAnd(expr)
+            .And(Between(
+                Terms.Char('{'),
+                ZeroOrMany(matchArm),
+                Terms.Char('}').ElseError("Expected '}' closing match statement")
+            ))
+            .Then<Stmt>(static (context, x) => new MatchStmt(x.Item1, x.Item2));
+
         // for i in start..end { ... }
         var forRangeStmt = Keyword("for")
             .SkipAnd(identifier)
@@ -437,6 +467,7 @@ public static class PspParser
             spawnWithBinding,
             localVarStmt,
             ifStmt.Then<Stmt>(static (context, i) => i),
+            matchStmt,
             forRangeStmt,
             forCondStmt,
             forEachStmt,
@@ -562,6 +593,16 @@ public static class PspParser
             ))
             .Then<TopDecl>(static (context, x) => new StructDecl(x.Item1, x.Item2));
 
+        // Enum: enum Season { Spring, Summer, Fall, Winter }
+        var enumDecl = Keyword("enum")
+            .SkipAnd(identifier.ElseError("Expected enum name after 'enum'"))
+            .And(Between(
+                Terms.Char('{'),
+                Separated(Terms.Char(','), identifier, min: 0).AndSkip(ZeroOrOne(Terms.Char(','))),
+                Terms.Char('}').ElseError("Expected '}' closing enum declaration")
+            ))
+            .Then<TopDecl>(static (context, x) => new EnumDecl(x.Item1, x.Item2));
+
         // Shared member parser for Actor and State blocks
         var containerMember = OneOf(
             lifecycleHook.Then<object>(static (context, h) => h),
@@ -647,6 +688,7 @@ public static class PspParser
             assetDecl,
             messageDecl,
             structDecl,
+            enumDecl,
             actorDecl,
             stateDecl,
             globalVarDecl,

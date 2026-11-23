@@ -40,6 +40,10 @@ public sealed partial class CCodeGenerator
                 EmitIfStmt(ifStmt, ctx);
                 break;
 
+            case MatchStmt matchStmt:
+                EmitMatchStmt(matchStmt, ctx);
+                break;
+
             case ForStmt forStmt:
                 _writer.OpenBlock($"while ({EmitExpr(forStmt.Condition, ctx)})");
                 EmitBlockStatements(forStmt.Body, ctx);
@@ -186,6 +190,47 @@ public sealed partial class CCodeGenerator
             EmitBlockStatements(elseBlock, ctx);
             _writer.CloseBlock();
         }
+    }
+
+    private void EmitMatchStmt(MatchStmt matchStmt, EmissionContext ctx)
+    {
+        _writer.OpenBlock($"switch ({EmitExpr(matchStmt.Scrutinee, ctx)})");
+        bool hasDefault = false;
+
+        foreach (var arm in matchStmt.Arms)
+        {
+            string caseHeader = arm.Pattern switch
+            {
+                EnumVariantPattern ev => $"case {ev.EnumName}_{ev.VariantName}:",
+                IntLiteralPattern il => $"case {il.Value}:",
+                WildcardPattern => "default:",
+                _ => "default:"
+            };
+
+            if (arm.Pattern is WildcardPattern)
+            {
+                hasDefault = true;
+            }
+
+            _writer.OpenBlock(caseHeader);
+            if (arm.Body is BlockStmt block)
+            {
+                EmitBlockStatements(block, ctx);
+            }
+            else
+            {
+                EmitStmt(arm.Body, ctx.Clone());
+            }
+            _writer.WriteLine("break;");
+            _writer.CloseBlock();
+        }
+
+        if (!hasDefault)
+        {
+            _writer.WriteLine("default: __builtin_unreachable();");
+        }
+
+        _writer.CloseBlock();
     }
 
     private void EmitForRangeStmt(ForRangeStmt forRangeStmt, EmissionContext ctx)

@@ -30,6 +30,13 @@ public sealed record StructSymbol(
     StructDecl Declaration
 );
 
+public sealed record EnumSymbol(
+    string Name,
+    EnumType Type,
+    IReadOnlyList<string> Variants,
+    EnumDecl Declaration
+);
+
 public sealed record FunctionSymbol(
     string Name,
     IReadOnlyList<ParamSymbol> Parameters,
@@ -157,6 +164,7 @@ public sealed class SymbolTable
     public Dictionary<string, AssetSymbol> Assets { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, MessageSymbol> Messages { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, StructSymbol> Structs { get; } = new(StringComparer.Ordinal);
+    public Dictionary<string, EnumSymbol> Enums { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, ActorSymbol> Actors { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, StateSymbol> States { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, VariableSymbol> Globals { get; } = new(StringComparer.Ordinal);
@@ -178,6 +186,7 @@ public sealed class SymbolTable
         return type switch
         {
             PrimitiveType prim => prim.ByteSize,
+            EnumType => 4,     // 32-bit int32_t enum value
             ActorRefType => 4, // 32-bit generational handle (16-bit index + 16-bit generation)
             AssetType => 4,    // 32-bit static asset table index / pointer
             FixedArrayType arr => Math.Max(0, arr.Length) * EstimateTypeByteSize(arr.ElementType, visitedStructs),

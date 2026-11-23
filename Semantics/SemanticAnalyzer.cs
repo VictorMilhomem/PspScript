@@ -110,6 +110,39 @@ public sealed class SemanticAnalyzer
                     );
                     break;
 
+                case EnumDecl enumDecl:
+                    if (!RegisterUniqueTopLevel(enumDecl.Name, enumDecl))
+                        break;
+
+                    if (enumDecl.Variants.Count == 0)
+                    {
+                        ReportError($"Enum '{enumDecl.Name}' must declare at least one variant.", enumDecl.Span);
+                    }
+
+                    var uniqueVariants = new List<string>(enumDecl.Variants.Count);
+                    var seenVariants = new HashSet<string>(StringComparer.Ordinal);
+                    foreach (var variant in enumDecl.Variants)
+                    {
+                        if (!seenVariants.Add(variant))
+                        {
+                            ReportError($"Duplicate variant '{variant}' in enum '{enumDecl.Name}'.", enumDecl.Span);
+                        }
+                        else
+                        {
+                            uniqueVariants.Add(variant);
+                        }
+                    }
+
+                    var enumType = new EnumType(enumDecl.Name);
+                    _symbols.Enums[enumDecl.Name] = new EnumSymbol(
+                        enumDecl.Name,
+                        enumType,
+                        uniqueVariants,
+                        enumDecl
+                    );
+                    _model.RecordType(enumDecl, enumType);
+                    break;
+
                 case ActorDecl actor:
                     if (!RegisterUniqueTopLevel(actor.Name, actor))
                         break;
@@ -468,6 +501,9 @@ public sealed class SemanticAnalyzer
         if (_symbols.Structs.TryGetValue(named.Name, out var structSym))
             return structSym.Type;
 
+        if (_symbols.Enums.TryGetValue(named.Name, out var enumSym))
+            return enumSym.Type;
+
         if (_symbols.Actors.ContainsKey(named.Name))
         {
             ReportError(
@@ -792,6 +828,8 @@ public sealed class SemanticAnalyzer
         BlockStmt blk => BlockDefinitelyReturns(blk),
         IfStmt { ElseBranch: not null } ifStmt =>
             BlockDefinitelyReturns(ifStmt.ThenBranch) && StmtDefinitelyReturns(ifStmt.ElseBranch),
+        MatchStmt { Arms.Count: > 0 } matchStmt =>
+            matchStmt.Arms.All(static arm => StmtDefinitelyReturns(arm.Body)),
         _ => false
     };
 
@@ -828,6 +866,10 @@ public sealed class SemanticAnalyzer
 
             case IfStmt ifStmt:
                 ValidateIfStmt(ifStmt, scope);
+                break;
+
+            case MatchStmt matchStmt:
+                ValidateMatchStmt(matchStmt, scope);
                 break;
 
             case ForStmt forStmt:
@@ -970,7 +1012,12 @@ public sealed class SemanticAnalyzer
         }
 
         var targetType = ResolveExpr(assign.Target, scope, expectedType: null);
-        if (IsReadOnlyComputedProperty(assign.Target, out string? readOnlyProp))
+        if (assign.Target is FieldAccessExpr { Target: IdentifierExpr enumId } enumField &&
+            _symbols.Enums.ContainsKey(enumId.Name))
+        {
+            ReportError($"Cannot assign to enum variant '{enumId.Name}.{enumField.FieldName}'.", assign.Span);
+        }
+        else if (IsReadOnlyComputedProperty(assign.Target, out string? readOnlyProp))
         {
             ReportError($"Cannot assign to read-only computed property '{readOnlyProp}'.", assign.Span);
         }
@@ -1032,6 +1079,174 @@ public sealed class SemanticAnalyzer
         }
 
         _model.RecordType(ifStmt, ResolvedType.Void);
+    }
+
+    private void ValidateMatchStmt(MatchStmt matchStmt, LexicalScope scope)
+    {
+        var scrutineeType = ResolveExpr(matchStmt.Scrutinee, scope, expectedType: null);
+        _model.RecordType(matchStmt, ResolvedType.Void);
+
+        if (matchStmt.Arms.Count == 0)
+        {
+            ReportError("'match' statement must have at least one arm.", matchStmt.Span);
+            return;
+        }
+
+        if (scrutineeType.IsError)
+        {
+            foreach (var arm in matchStmt.Arms)
+            {
+                ValidateMatchArmBody(arm.Body, scope);
+            }
+            return;
+        }
+
+        if (scrutineeType is EnumType enumType && _symbols.Enums.TryGetValue(enumType.Name, out var enumSym))
+        {
+            var coveredVariants = new HashSet<string>(StringComparer.Ordinal);
+            bool hasWildcard = false;
+
+            foreach (var arm in matchStmt.Arms)
+            {
+                if (hasWildcard)
+                {
+                    ReportError("Unreachable 'match' arm after wildcard '_'.", arm.Span);
+                }
+
+                switch (arm.Pattern)
+                {
+                    case WildcardPattern:
+                        if (hasWildcard)
+                        {
+                            ReportError("Duplicate wildcard '_' arm in 'match' statement.", arm.Span);
+                        }
+                        hasWildcard = true;
+                        break;
+
+                    case EnumVariantPattern variantPat:
+                        if (!string.Equals(variantPat.EnumName, enumSym.Name, StringComparison.Ordinal))
+                        {
+                            ReportError(
+                                $"Match arm pattern '{variantPat.EnumName}.{variantPat.VariantName}' does not match scrutinee enum type '{enumSym.Name}'.",
+                                arm.Span
+                            );
+                        }
+                        else if (!enumSym.Variants.Contains(variantPat.VariantName))
+                        {
+                            ReportError(
+                                $"Enum '{enumSym.Name}' does not contain a variant named '{variantPat.VariantName}'.",
+                                arm.Span
+                            );
+                        }
+                        else if (!coveredVariants.Add(variantPat.VariantName))
+                        {
+                            ReportError(
+                                $"Duplicate match arm for '{enumSym.Name}.{variantPat.VariantName}'.",
+                                arm.Span
+                            );
+                        }
+                        break;
+
+                    case IntLiteralPattern intPat:
+                        ReportError(
+                            $"Cannot match integer literal '{intPat.Value}' against enum type '{enumSym.Name}'.",
+                            arm.Span
+                        );
+                        break;
+                }
+
+                ValidateMatchArmBody(arm.Body, scope);
+            }
+
+            if (!hasWildcard)
+            {
+                var missing = enumSym.Variants.Where(v => !coveredVariants.Contains(v)).ToList();
+                if (missing.Count > 0)
+                {
+                    string missingList = string.Join(", ", missing.Select(static v => $"'{v}'"));
+                    ReportError(
+                        $"Non-exhaustive match on '{enumSym.Name}': missing cases {missingList}.",
+                        matchStmt.Span
+                    );
+                }
+            }
+        }
+        else if (scrutineeType.IsInteger)
+        {
+            var coveredInts = new HashSet<int>();
+            bool hasWildcard = false;
+
+            foreach (var arm in matchStmt.Arms)
+            {
+                if (hasWildcard)
+                {
+                    ReportError("Unreachable 'match' arm after wildcard '_'.", arm.Span);
+                }
+
+                switch (arm.Pattern)
+                {
+                    case WildcardPattern:
+                        if (hasWildcard)
+                        {
+                            ReportError("Duplicate wildcard '_' arm in 'match' statement.", arm.Span);
+                        }
+                        hasWildcard = true;
+                        break;
+
+                    case IntLiteralPattern intPat:
+                        if (!coveredInts.Add(intPat.Value))
+                        {
+                            ReportError(
+                                $"Duplicate match arm for integer literal '{intPat.Value}'.",
+                                arm.Span
+                            );
+                        }
+                        break;
+
+                    case EnumVariantPattern variantPat:
+                        ReportError(
+                            $"Cannot match enum variant '{variantPat.EnumName}.{variantPat.VariantName}' against integer type '{scrutineeType}'.",
+                            arm.Span
+                        );
+                        break;
+                }
+
+                ValidateMatchArmBody(arm.Body, scope);
+            }
+
+            if (!hasWildcard)
+            {
+                ReportError(
+                    $"Non-exhaustive match on integer type '{scrutineeType}': a wildcard '_' arm is required.",
+                    matchStmt.Span
+                );
+            }
+        }
+        else
+        {
+            ReportError(
+                $"'match' scrutinee must be an enum or integer type, got '{scrutineeType}'.",
+                matchStmt.Scrutinee.Span
+            );
+
+            foreach (var arm in matchStmt.Arms)
+            {
+                ValidateMatchArmBody(arm.Body, scope);
+            }
+        }
+    }
+
+    private void ValidateMatchArmBody(Stmt body, LexicalScope parentScope)
+    {
+        var armScope = parentScope.CreateChild(isInsideLoop: false);
+        if (body is BlockStmt block)
+        {
+            ValidateBlockStmt(block, armScope, createChildScope: false);
+        }
+        else
+        {
+            ValidateStmt(body, armScope);
+        }
     }
 
     private bool IsReadOnlyComputedProperty(Expr target, out string? propertyName)
@@ -1479,6 +1694,16 @@ public sealed class SemanticAnalyzer
         if (_symbols.Actors.TryGetValue(idExpr.Name, out var actorSym) && actorSym.IsSingleton)
             return actorSym.RefType;
 
+        if (_symbols.Enums.TryGetValue(idExpr.Name, out var enumSym))
+        {
+            string example = enumSym.Variants.Count > 0 ? enumSym.Variants[0] : "Variant";
+            ReportError(
+                $"'{idExpr.Name}' is an enum type; access a variant such as '{idExpr.Name}.{example}'.",
+                idExpr.Span
+            );
+            return ResolvedType.Error;
+        }
+
         ReportError($"Undeclared identifier '{idExpr.Name}'.", idExpr.Span);
         return ResolvedType.Error;
     }
@@ -1639,6 +1864,23 @@ public sealed class SemanticAnalyzer
 
     private ResolvedType ResolveFieldAccessExpr(FieldAccessExpr fieldExpr, LexicalScope scope)
     {
+        // Enum variant access: EnumName.Variant
+        if (fieldExpr.Target is IdentifierExpr enumId &&
+            _symbols.Enums.TryGetValue(enumId.Name, out var enumSym))
+        {
+            _model.RecordType(fieldExpr.Target, enumSym.Type);
+            if (enumSym.Variants.Contains(fieldExpr.FieldName))
+            {
+                return enumSym.Type;
+            }
+
+            ReportError(
+                $"Enum '{enumSym.Name}' does not contain a variant named '{fieldExpr.FieldName}'.",
+                fieldExpr.Span
+            );
+            return ResolvedType.Error;
+        }
+
         var targetType = ResolveExpr(fieldExpr.Target, scope, expectedType: null);
         if (targetType.IsError)
             return ResolvedType.Error;

@@ -270,6 +270,10 @@ static void PrintAstSummary(ProgramNode program, SemanticModel model)
                 Console.WriteLine($"  [Struct] {st.Name} ({st.Fields.Count} field(s))");
                 break;
 
+            case EnumDecl en:
+                Console.WriteLine($"  [Enum] {en.Name} ({en.Variants.Count} variant(s))");
+                break;
+
             case GlobalVarDecl gvar:
                 Console.WriteLine($"  [GlobalVar] ({gvar.Scope}) {gvar.Name} : {model.GetTypeOrDefault(gvar)}");
                 break;

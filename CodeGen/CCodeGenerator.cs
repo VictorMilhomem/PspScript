@@ -112,6 +112,18 @@ public sealed partial class CCodeGenerator
         _writer.CloseBlock(" PspsStateId;");
         _writer.WriteLine();
 
+        foreach (var en in _symbols.Enums.Values)
+        {
+            _writer.OpenBlock($"typedef enum {en.Name}");
+            for (int i = 0; i < en.Variants.Count; i++)
+            {
+                string comma = (i + 1 < en.Variants.Count) ? "," : string.Empty;
+                _writer.WriteLine($"{en.Name}_{en.Variants[i]} = {i}{comma}");
+            }
+            _writer.CloseBlock($" {en.Name}_t;");
+            _writer.WriteLine();
+        }
+
         foreach (var st in _symbols.Structs.Values)
         {
             _writer.WriteLine($"typedef struct {st.Name} {st.Name}_t;");

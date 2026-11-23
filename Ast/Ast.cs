@@ -42,6 +42,11 @@ public record StructDecl(
     IReadOnlyList<FieldDecl> Fields
 ): TopDecl;
 
+public record EnumDecl(
+    string Name,
+    IReadOnlyList<string> Variants
+): TopDecl;
+
 public record ActorDecl(
     string Name,
     int? PoolCapacity, // null = singleton actor; non-null = static pool
@@ -173,6 +178,21 @@ public record IfStmt(
     BlockStmt ThenBranch,
     Stmt? ElseBranch
 ): Stmt;
+
+public record MatchStmt(
+    Expr Scrutinee,
+    IReadOnlyList<MatchArm> Arms
+) : Stmt;
+
+public record MatchArm(
+    MatchPattern Pattern,
+    Stmt Body
+) : AstNode;
+
+public abstract record MatchPattern : AstNode;
+public record EnumVariantPattern(string EnumName, string VariantName) : MatchPattern;
+public record IntLiteralPattern(int Value) : MatchPattern;
+public record WildcardPattern() : MatchPattern;
 
 /// <summary>
 /// Go-style conditional loop: for cond { ... }
