@@ -30,7 +30,7 @@ internal static class AssetBaker
     public static BakedTextureAsset BakeTexture(AssetSymbol asset, string? baseDirectory)
     {
         BakedPixelFormat format = ResolveRequestedFormat(asset.Declaration.Options);
-        string? resolvedPath = ResolveAssetPath(asset.FilePath, baseDirectory);
+        string? resolvedPath = ResolveAssetPath(asset.FilePath, asset.Declaration.SourceDirectory, baseDirectory);
 
         if (resolvedPath is not null && File.Exists(resolvedPath))
         {
@@ -75,10 +75,17 @@ internal static class AssetBaker
         return BakedPixelFormat.Rgba4444;
     }
 
-    private static string? ResolveAssetPath(string rawPath, string? baseDirectory)
+    private static string? ResolveAssetPath(string rawPath, string? declaringDirectory, string? baseDirectory)
     {
         if (Path.IsPathRooted(rawPath) && File.Exists(rawPath))
             return rawPath;
+
+        if (!string.IsNullOrEmpty(declaringDirectory))
+        {
+            string declaringCandidate = Path.GetFullPath(Path.Combine(declaringDirectory, rawPath));
+            if (File.Exists(declaringCandidate))
+                return declaringCandidate;
+        }
 
         if (!string.IsNullOrEmpty(baseDirectory))
         {

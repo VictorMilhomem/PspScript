@@ -14,7 +14,7 @@ PSPScript enforces static resource budgets at compile time:
 - **Static Actor Pools & Generational Handles**: Actors are declared either as singletons (`actor Player`) or fixed-capacity pools (`actor Ball[4]`) and referenced via 32-bit generational handles (`ref<T>`) to prevent dangling-pointer crashes without garbage collection.
 - **Typed Message Passing**: Actor communication uses `message`, `send(...)`, and `on Msg(msg)` handlers lowered to a static tagged union and fixed-capacity frame mailbox.
 - **Game Primitives & Compile-Time PNG Baking**: First-class `vec2`, `vec3`, `rect` (16-byte aligned for VFPU), compile-time ABGR8888 `color` (`#RRGGBB` / `#RRGGBBAA`), auto-ticking `timer` (`0.5s`, `750ms`), and a zero-dependency PNG baker (`AssetBaker.cs`) embedding real PNG sprites/spritesheets directly into static `RGBA4444` or `ABGR8888` C99 arrays.
-- **Modular `import` System & Explicit Entry States**: Split games across multiple `.psps` files (`import "actors/ball.psps"`) with automatic diamond deduplication, cycle detection, and explicit `entry: MainMenu` configuration in `game { ... }`.
+- **Modular `import` System, Bare `StdLib` Resolution & Explicit Entry States**: Split games across multiple `.psps` files (`import "actors/ball.psps"`) or import bundled standard library modules by bare name (`import collision` / `import "collision"`, with project-local override support), complete with automatic diamond deduplication, cycle detection, and explicit `entry: MainMenu` configuration in `game { ... }`.
 
 ---
 
@@ -114,6 +114,7 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 | `Semantics/` | Two-pass semantic analyzer, symbol table, type checker, entry state & static RAM budget validator |
 | `CodeGen/` | Modular C99 code generator (`CSourceWriter`, `CTypeMapper`, `AssetBaker`, `Actors`, `States`, `Statements`, `Expressions`) |
 | `Runtime/` | Zero-heap STB-style C99 headers (`psps_runtime.h`, `psps_types.h`, `psps_arena.h`, `psps_video.h`, `psps_input.h`, `psps_save.h`) |
+| `StdLib/` | Bundled zero-allocation PSPScript standard library modules imported by bare name (e.g., [collision.psps](StdLib/collision.psps)) |
 | `examples/` | Modular `.psps` projects: [Pong](examples/pong/main.psps), [Sprite Demo](examples/sprite/main.psps), and [Animation Demo](examples/anim/main.psps) |
 | `docs/` | [Language Tutorial](docs/tutorial.md) & [EBNF Grammar](docs/grammar.md) |
 | `vscode-pspscript/` | VS Code syntax highlighting extension & snippets |
@@ -142,7 +143,7 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 
 ### v0.1 (Current Release)
 * [x] AST (Abstract Syntax Tree) Design
-* [x] Parser (using Parlot 2.3) & Multi-File `import` Module Loader
+* [x] Parser (using Parlot 2.3), Multi-File `import` Loader & Bare `StdLib` Module Resolution (`StdLib/collision.psps`)
 * [x] Two-Pass Semantic Analysis, Type Checking, Explicit `entry:` State & Static RAM Budget Validation
 * [x] Modular C99 Code Generator (Static Arenas, Actor Pools, Generational Handles & Frame Mailbox)
 * [x] Compile-Time PNG Asset Baker (pure C# `.png` → static `RGBA4444` / `ABGR8888` C99 arrays)
@@ -153,6 +154,7 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 * [x] Language Tutorial & Modular Examples (`examples/pong`, `examples/sprite`, `examples/anim`)
 
 ### Planned for v0.2+
+* [ ] Additional Standard Library Modules (`math`, `easing`, `tilemap`, `particles`)
 * [ ] Compile-Time Audio Asset Baker (WAV → PCM) & PSP Audio Runtime Module (`psps_audio.h`)
 * [ ] Language Server (LSP) for Real-Time VS Code Diagnostics & Autocomplete
 * [ ] Automated Unit & Integration Test Suite

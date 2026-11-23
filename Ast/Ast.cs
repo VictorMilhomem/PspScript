@@ -28,7 +28,8 @@ public record AssetDecl(
     string Name,
     string AssetKind,
     string FilePath,
-    IReadOnlyList<NamedArg> Options
+    IReadOnlyList<NamedArg> Options,
+    string? SourceDirectory = null
 ): TopDecl;
 
 public record MessageDecl(

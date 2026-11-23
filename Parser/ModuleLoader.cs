@@ -17,11 +17,6 @@ public sealed record ModuleLoadResult(
     IReadOnlyList<ModuleLoadError> Errors
 );
 
-/// <summary>
-/// Recursively loads a PSPScript entry file and all transitive <c>import "..."</c> modules,
-/// resolving relative paths, deduplicating diamond imports, detecting circular dependencies,
-/// and merging declarations into a single <see cref="ProgramNode"/>.
-/// </summary>
 public sealed class ModuleLoader
 {
     private readonly HashSet<string> _loadedPaths = new(StringComparer.Ordinal);
@@ -126,10 +121,18 @@ public sealed class ModuleLoader
                     ? rawImport
                     : $"{rawImport}.psps";
 
-                string targetFullPath = Path.GetFullPath(Path.Combine(currentDir, normalizedRel));
-                string targetDisplay = Path.GetRelativePath(Directory.GetCurrentDirectory(), targetFullPath);
+                var (targetFullPath, targetDisplay, notFoundMessage) = ResolveImportTarget(rawImport, normalizedRel, currentDir);
+                if (targetFullPath is null)
+                {
+                    _errors.Add(new ModuleLoadError(displayPath, notFoundMessage!));
+                    continue;
+                }
 
                 LoadFileRecursive(targetFullPath, targetDisplay, requestedBy: displayPath);
+            }
+            else if (decl is AssetDecl assetDecl)
+            {
+                _mergedDeclarations.Add(assetDecl with { SourceDirectory = currentDir });
             }
             else
             {
@@ -138,5 +141,69 @@ public sealed class ModuleLoader
         }
 
         _activeStack.RemoveAt(_activeStack.Count - 1);
+    }
+
+    private static (string? CanonicalPath, string DisplayPath, string? NotFoundMessage) ResolveImportTarget(
+        string rawImport,
+        string normalizedRel,
+        string currentDir)
+    {
+        if (IsBareModuleSpecifier(rawImport))
+        {
+            // 1. Check project-local override in the importing file's directory first
+            string localCandidate = Path.GetFullPath(Path.Combine(currentDir, normalizedRel));
+            if (File.Exists(localCandidate))
+            {
+                string localDisplay = Path.GetRelativePath(Directory.GetCurrentDirectory(), localCandidate);
+                return (localCandidate, localDisplay, null);
+            }
+
+            // 2. Fall back to the bundled Standard Library (AppContext.BaseDirectory/StdLib, then repo StdLib/)
+            string? stdLibPath = TryResolveStdLibModule(normalizedRel);
+            if (stdLibPath is not null)
+            {
+                return (stdLibPath, $"StdLib/{normalizedRel}", null);
+            }
+
+            return (
+                null,
+                rawImport,
+                $"Imported module '{rawImport}' not found (checked '{localCandidate}' and StdLib)."
+            );
+        }
+
+        string targetFullPath = Path.GetFullPath(Path.Combine(currentDir, normalizedRel));
+        string targetDisplay = Path.GetRelativePath(Directory.GetCurrentDirectory(), targetFullPath);
+        return (targetFullPath, targetDisplay, null);
+    }
+
+    private static bool IsBareModuleSpecifier(string specifier) =>
+        !specifier.StartsWith('.') &&
+        !specifier.Contains('/') &&
+        !specifier.Contains('\\') &&
+        !Path.IsPathRooted(specifier);
+
+    private static string? TryResolveStdLibModule(string normalizedFileName)
+    {
+        string baseDirCandidate = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "StdLib", normalizedFileName));
+        if (File.Exists(baseDirCandidate))
+        {
+            return baseDirCandidate;
+        }
+
+        // Development fallback (e.g. `dotnet run` when StdLib resides at repository/solution root)
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir?.Parent is not null)
+        {
+            dir = dir.Parent;
+            string parentCandidate = Path.GetFullPath(Path.Combine(dir.FullName, "StdLib", normalizedFileName));
+            if (File.Exists(parentCandidate))
+            {
+                return parentCandidate;
+            }
+        }
+
+        string cwdCandidate = Path.GetFullPath(Path.Combine(Directory.GetCurrentDirectory(), "StdLib", normalizedFileName));
+        return File.Exists(cwdCandidate) ? cwdCandidate : null;
     }
 }

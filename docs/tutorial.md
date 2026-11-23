@@ -8,7 +8,7 @@ Welcome to **PSPScript** — a domain-specific game scripting language designed 
 
 1. [Why PSPScript? (The PSP Hardware Model)](#1-why-pspscript-the-psp-hardware-model)
 2. [Quick Start & CLI Workflow](#2-quick-start--cli-workflow)
-3. [Game Configuration & Static Memory Budget](#3-game-configuration--static-memory-budget)
+3. [Game Configuration, Imports & Static Memory Budget](#3-game-configuration-imports--static-memory-budget)
 4. [Type System & Game Primitives](#4-type-system--game-primitives)
 5. [Variables & Static Memory Scopes](#5-variables--static-memory-scopes)
 6. [Structs & Compile-Time Assets](#6-structs--compile-time-assets)
@@ -16,10 +16,10 @@ Welcome to **PSPScript** — a domain-specific game scripting language designed 
 8. [Typed Message Passing (`message`, `on`, `send`)](#8-typed-message-passing-message-on-send)
 9. [Game States & Transitions (`state`, `goto`)](#9-game-states--transitions-state-goto)
 10. [Control Flow & Functions](#10-control-flow--functions)
-11. [Built-In PSP Runtime Functions & Input](#11-built-in-psp-runtime-functions--input)
+11. [Built-In PSP Runtime Functions, Input & Standard Library](#11-built-in-psp-runtime-functions-input--standard-library)
 12. [2D Camera, Tilemaps, Bitmap Fonts & Save Data](#12-2d-camera-tilemaps-bitmap-fonts--save-data)
 13. [The Deterministic 4-Phase Frame Loop](#13-the-deterministic-4-phase-frame-loop)
-14. [Complete Playable Example](#14-complete-playable-example)
+14. [Complete Playable Examples](#14-complete-playable-examples)
 
 ---
 
@@ -60,19 +60,23 @@ dotnet run -- examples/pong/main.psps --check --dump-ast
 
 ## 3. Game Configuration, Imports & Static Memory Budget
 
-### Splitting Projects with `import`
+### Splitting Projects & Importing Standard Library Modules (`import`)
 
-Large games can be split across multiple `.psps` files using top-level `import` declarations:
+Large games can be split across multiple `.psps` files—and import bundled Standard Library modules—using top-level `import` declarations:
 
 ```pspscript
-import "shared/math.psps"
+import collision             // Bare StdLib module (unquoted identifier)
+import "collision"           // Bare StdLib module (quoted string)
+import "shared/math.psps"    // Relative path
 import "actors/paddles"      // '.psps' extension is optional
-import "actors/ball.psps"
 ```
 
-- Paths are resolved relative to the file containing the `import`.
-- Diamond imports (multiple files importing the same shared module) are automatically deduplicated (`#pragma once` semantics).
-- Circular imports are detected and reported at compile time.
+- **Relative paths** (containing `/` or `\`, or starting with `.`) are resolved relative to the file containing the `import`.
+- **Bare module names** (no path separators and no leading `.`) resolve in order:
+  1. `<importingFileDir>/<name>.psps` — allows project-local overrides.
+  2. Bundled `StdLib/<name>.psps` — resolved from the compiler's `StdLib/` directory.
+- **Deduplication & cycle checks**: Diamond imports (multiple files importing the same local or `StdLib` module) are automatically deduplicated (`#pragma once` semantics), and circular imports are reported at compile time.
+- **Assets in imported files**: `asset` paths declared inside an imported module resolve relative to the file that declared them first, falling back to the entry file's directory.
 
 ### Game Configuration (`game`)
 
@@ -422,7 +426,7 @@ fn draw_dashed_net() {
 
 ---
 
-## 11. Built-In PSP Runtime Functions & Input
+## 11. Built-In PSP Runtime Functions, Input & Standard Library
 
 ### Rendering, Camera & Persistence (480×272 Logical Coordinates)
 
@@ -463,6 +467,47 @@ PSP button bitmasks (matching `Runtime/psps_input.h`):
 ### Single-Precision Math Intrinsics
 
 `sin(x)`, `cos(x)`, `sqrt(x)`, `abs(x)`, `min(a, b)`, `max(a, b)`, `clamp(val, low, high)`, `lerp(a, b, t)`.
+
+### Standard Library Modules (`StdLib/`)
+
+PSPScript ships with zero-allocation standard library modules written in pure `f32` PSPScript, imported by bare name (`import collision` or `import "collision"`):
+
+#### `collision` (`StdLib/collision.psps`)
+
+Value structs:
+- `AABB { pos: vec2 = { 0.0, 0.0 }, size: vec2 = { 0.0, 0.0 } }`
+- `Circle { center: vec2 = { 0.0, 0.0 }, radius: f32 = 0.0 }`
+
+Pure collision queries:
+
+| Function | Signature | Description |
+| :--- | :--- | :--- |
+| `aabb_overlaps` | `(a: AABB, b: AABB) -> bool` | Axis-aligned bounding box overlap test |
+| `aabb_contains_point` | `(box: AABB, point: vec2) -> bool` | Inclusive point-in-AABB test |
+| `rect_overlaps` | `(a: rect, b: rect) -> bool` | Overlap test for built-in `rect` values |
+| `circle_overlaps` | `(a: Circle, b: Circle) -> bool` | Squared-distance circle-circle overlap test |
+| `circle_aabb_overlaps` | `(c: Circle, box: AABB) -> bool` | Closest-point circle-AABB overlap test |
+
+```pspscript
+import collision
+
+state Arena {
+    player_box: AABB
+    hazard: Circle
+    hit: bool = false
+
+    init() {
+        player_box.pos = { 100.0, 100.0 }
+        player_box.size = { 24.0, 24.0 }
+        hazard.center = { 120.0, 112.0 }
+        hazard.radius = 10.0
+    }
+
+    update(dt: f32) {
+        hit = circle_aabb_overlaps(hazard, player_box)
+    }
+}
+```
 
 ---
 

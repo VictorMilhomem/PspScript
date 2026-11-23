@@ -604,7 +604,7 @@ public static class PspParser
         // ====================================================================
 
         var importDecl = Keyword("import")
-            .SkipAnd(stringLiteral.ElseError("Expected module path string after 'import'"))
+            .SkipAnd(OneOf(stringLiteral, identifier).ElseError("Expected module name or path string after 'import'"))
             .Then<TopDecl>(static (context, path) => new ImportDecl(path));
 
         var topDecl = OneOf(

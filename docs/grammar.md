@@ -10,9 +10,9 @@ TopDecl        ::= ImportDecl
                  | GlobalVarDecl
                  | FuncDecl
 
-// Compile-time module import (relative path, auto-deduplicated)
-ImportDecl     ::= "import" STRING
-// E.g.: import "actors/player.psps"
+// Compile-time module import (relative path or bare StdLib module name, auto-deduplicated)
+ImportDecl     ::= "import" (STRING | IDENT)
+// E.g.: import "actors/player.psps", import "collision", import collision
 
 // Global EBOOT configuration and memory budget
 GameConfig     ::= "game" STRING "{" ConfigField* "}"
@@ -123,4 +123,4 @@ Primary        ::= INT
                  | IDENT
                  | "(" Expr ")"
 
-VecLiteral     ::= "{" Expr "," Expr ("," Expr)? "}"
+VecLiteral     ::= "{" Expr "," Expr ("," Expr ("," Expr)?)? "}"

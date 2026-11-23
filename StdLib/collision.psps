@@ -1,0 +1,49 @@
+// ============================================================================
+// PSPScript Standard Library: 2D Collision Primitives & Queries
+// ============================================================================
+
+struct AABB {
+    pos: vec2 = { 0.0, 0.0 },
+    size: vec2 = { 0.0, 0.0 }
+}
+
+struct Circle {
+    center: vec2 = { 0.0, 0.0 },
+    radius: f32 = 0.0
+}
+
+fn aabb_overlaps(a: AABB, b: AABB) -> bool {
+    return a.pos.x < b.pos.x + b.size.x &&
+           a.pos.x + a.size.x > b.pos.x &&
+           a.pos.y < b.pos.y + b.size.y &&
+           a.pos.y + a.size.y > b.pos.y
+}
+
+fn aabb_contains_point(box: AABB, point: vec2) -> bool {
+    return point.x >= box.pos.x &&
+           point.x <= box.pos.x + box.size.x &&
+           point.y >= box.pos.y &&
+           point.y <= box.pos.y + box.size.y
+}
+
+fn rect_overlaps(a: rect, b: rect) -> bool {
+    return a.x < b.x + b.w &&
+           a.x + a.w > b.x &&
+           a.y < b.y + b.h &&
+           a.y + a.h > b.y
+}
+
+fn circle_overlaps(a: Circle, b: Circle) -> bool {
+    var dx: f32 = a.center.x - b.center.x
+    var dy: f32 = a.center.y - b.center.y
+    var r: f32 = a.radius + b.radius
+    return (dx * dx + dy * dy) <= (r * r)
+}
+
+fn circle_aabb_overlaps(c: Circle, box: AABB) -> bool {
+    var closest_x: f32 = clamp(c.center.x, box.pos.x, box.pos.x + box.size.x)
+    var closest_y: f32 = clamp(c.center.y, box.pos.y, box.pos.y + box.size.y)
+    var dx: f32 = c.center.x - closest_x
+    var dy: f32 = c.center.y - closest_y
+    return (dx * dx + dy * dy) <= (c.radius * c.radius)
+}
