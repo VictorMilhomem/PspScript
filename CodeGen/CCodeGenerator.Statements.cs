@@ -54,6 +54,10 @@ public sealed partial class CCodeGenerator
                 EmitForEachStmt(forEachStmt, ctx);
                 break;
 
+            case BreakStmt:
+                _writer.WriteLine("break;");
+                break;
+
             case ReturnStmt returnStmt:
                 if (returnStmt.Value is null)
                 {

@@ -70,6 +70,7 @@ Stmt           ::= LocalVarDecl
                  | ForStmt
                  | ForRangeStmt
                  | ForEachStmt
+                 | BreakStmt
                  | ReturnStmt
                  | SendStmt
                  | SpawnStmt
@@ -97,6 +98,7 @@ ForEachStmt    ::= "each" IDENT "in" IDENT Block
 IfStmt         ::= "if" Expr Block ("else" (IfStmt | Block))?
 ForStmt        ::= "for" Expr Block
 ForRangeStmt   ::= "for" IDENT "in" Expr ".." Expr Block
+BreakStmt      ::= "break"
 ReturnStmt     ::= "return" Expr?
 AssignStmt     ::= Expr ("=" | "+=" | "-=" | "*=" | "/=") Expr
 ExprStmt       ::= Expr

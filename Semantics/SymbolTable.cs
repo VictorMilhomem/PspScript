@@ -108,17 +108,20 @@ public sealed class LexicalScope
     public ActorSymbol? EnclosingActor { get; }
     public StateSymbol? EnclosingState { get; }
     public ResolvedType ExpectedReturnType { get; }
+    public bool IsInsideLoop { get; }
 
     public LexicalScope(
         LexicalScope? parent,
         ActorSymbol? enclosingActor = null,
         StateSymbol? enclosingState = null,
-        ResolvedType? expectedReturnType = null)
+        ResolvedType? expectedReturnType = null,
+        bool? isInsideLoop = null)
     {
         Parent = parent;
         EnclosingActor = enclosingActor ?? parent?.EnclosingActor;
         EnclosingState = enclosingState ?? parent?.EnclosingState;
         ExpectedReturnType = expectedReturnType ?? parent?.ExpectedReturnType ?? ResolvedType.Void;
+        IsInsideLoop = isInsideLoop ?? parent?.IsInsideLoop ?? false;
     }
 
     public bool TryDeclareLocal(VariableSymbol symbol)
@@ -138,8 +141,8 @@ public sealed class LexicalScope
         return false;
     }
 
-    public LexicalScope CreateChild(ResolvedType? overrideReturnType = null) =>
-        new(this, EnclosingActor, EnclosingState, overrideReturnType ?? ExpectedReturnType);
+    public LexicalScope CreateChild(ResolvedType? overrideReturnType = null, bool? isInsideLoop = null) =>
+        new(this, EnclosingActor, EnclosingState, overrideReturnType ?? ExpectedReturnType, isInsideLoop);
 }
 
 

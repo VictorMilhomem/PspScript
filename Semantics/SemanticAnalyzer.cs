@@ -842,6 +842,10 @@ public sealed class SemanticAnalyzer
                 ValidateForEachStmt(forEachStmt, scope);
                 break;
 
+            case BreakStmt breakStmt:
+                ValidateBreakStmt(breakStmt, scope);
+                break;
+
             case ReturnStmt returnStmt:
                 ValidateReturnStmt(returnStmt, scope);
                 break;
@@ -1056,7 +1060,8 @@ public sealed class SemanticAnalyzer
             ReportError($"'for' condition must evaluate to 'bool', got '{condType}'.", forStmt.Span);
         }
 
-        ValidateBlockStmt(forStmt.Body, scope, createChildScope: true);
+        var loopScope = scope.CreateChild(isInsideLoop: true);
+        ValidateBlockStmt(forStmt.Body, loopScope, createChildScope: false);
         _model.RecordType(forStmt, ResolvedType.Void);
     }
 
@@ -1074,7 +1079,7 @@ public sealed class SemanticAnalyzer
             ReportError($"'for' range end must be an integer type, got '{endType}'.", forRangeStmt.End.Span);
         }
 
-        var loopScope = scope.CreateChild();
+        var loopScope = scope.CreateChild(isInsideLoop: true);
         loopScope.TryDeclareLocal(
             new VariableSymbol(
                 Name: forRangeStmt.IteratorName,
@@ -1112,7 +1117,7 @@ public sealed class SemanticAnalyzer
             iteratorType = actorSym.RefType;
         }
 
-        var loopScope = scope.CreateChild();
+        var loopScope = scope.CreateChild(isInsideLoop: true);
         loopScope.TryDeclareLocal(
             new VariableSymbol(
                 Name: forEachStmt.IteratorName,
@@ -1125,6 +1130,16 @@ public sealed class SemanticAnalyzer
 
         _model.RecordType(forEachStmt, iteratorType);
         ValidateBlockStmt(forEachStmt.Body, loopScope, createChildScope: false);
+    }
+
+    private void ValidateBreakStmt(BreakStmt breakStmt, LexicalScope scope)
+    {
+        if (!scope.IsInsideLoop)
+        {
+            ReportError("'break' statement can only be used inside a 'for' or 'each' loop.", breakStmt.Span);
+        }
+
+        _model.RecordType(breakStmt, ResolvedType.Void);
     }
 
     private void ValidateReturnStmt(ReturnStmt returnStmt, LexicalScope scope)

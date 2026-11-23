@@ -201,6 +201,8 @@ public record ForEachStmt(
     BlockStmt Body
 ) : Stmt;
 
+public record BreakStmt() : Stmt;
+
 public record ReturnStmt(Expr? Value) : Stmt;
 
 /// <summary>

@@ -30,7 +30,7 @@ PSPScript **v0.2** streamlines everyday PSP game code with unified `for` loops, 
 
 | Area | v0.1 | v0.2 |
 | :--- | :--- | :--- |
-| **Loops** *(breaking)* | `while cond { ... }` | `for cond { ... }` (Go-style) and `for i in start..end { ... }` (`while` removed) |
+| **Loops** *(breaking)* | `while cond { ... }` | `for cond { ... }` (Go-style), `for i in start..end { ... }`, and `break` (`while` removed) |
 | **Imports** | Relative paths only (`import "shared/math.psps"`) | Adds bare module imports (`import input`, `import collision`, `import "collision"`) with local override & `StdLib/` fallback |
 | **Standard Library** | Manual boilerplate for button bitmasks & 2D shapes | Bundled zero-allocation `StdLib/input.psps` (`BTN_*`, `dpad_vector()`) and `StdLib/collision.psps` (`AABB`, `Circle`) |
 | **`rect` Geometry** | Manual AABB math (`check_aabb(...)`) | Built-in `r.overlaps(other)`, `r.contains(point)`, and read-only `r.center` |
@@ -478,6 +478,7 @@ fn wait_until_edge(x: f32) -> f32 {
 - `for condition { ... }` — Go-style conditional loop (`condition` must be `bool`)
 - `for i in start..end { ... }` — exclusive integer range loop (`i` is an immutable, block-scoped `int`)
 - `each item in PoolName { ... }` — safe active-slot iteration over actor pools
+- `break` — exits the innermost `for` or `each` loop immediately
 - `return` or `return expr` (non-void functions must return a value on all code paths)
 - Functions without `-> Type` default to `void`.
 

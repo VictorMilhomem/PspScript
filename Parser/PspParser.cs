@@ -17,7 +17,7 @@ public static class PspParser
         "init", "update", "draw", "exit", "on",
         "int", "u8", "u16", "u32", "f32", "bool", "void",
         "vec2", "vec3", "rect", "color", "timer", "ref",
-        "if", "else", "for", "each", "in", "return",
+        "if", "else", "for", "each", "in", "break", "return",
         "send", "spawn", "destroy", "goto",
         "true", "false", "null", "self"
     };
@@ -363,6 +363,10 @@ public static class PspParser
             .And(blockStmt)
             .Then<Stmt>(static (context, x) => new ForEachStmt(x.Item1, x.Item2, x.Item3));
 
+        // break
+        var breakStmt = Keyword("break")
+            .Then<Stmt>(static (context, _) => new BreakStmt());
+
         // return expr?
         var returnStmt = Keyword("return")
             .SkipAnd(expr.NoNewLineBefore().ThenElse<Expr?>(static (context, e) => e, null))
@@ -436,6 +440,7 @@ public static class PspParser
             forRangeStmt,
             forCondStmt,
             forEachStmt,
+            breakStmt,
             returnStmt,
             sendStmt,
             spawnStandalone,
