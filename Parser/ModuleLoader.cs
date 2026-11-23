@@ -134,6 +134,10 @@ public sealed class ModuleLoader
             {
                 _mergedDeclarations.Add(assetDecl with { SourceDirectory = currentDir });
             }
+            else if (decl is GameConfigDecl gameDecl)
+            {
+                _mergedDeclarations.Add(gameDecl with { SourceDirectory = currentDir });
+            }
             else
             {
                 _mergedDeclarations.Add(decl);

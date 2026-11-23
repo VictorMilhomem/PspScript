@@ -238,7 +238,7 @@ public sealed partial class CCodeGenerator
         _writer.WriteLine();
 
         _writer.WriteLine("/* Initialize Video (480x272) & Controller Input */");
-        _writer.OpenBlock($"if (!psps_video_init(\"{CTypeMapper.EscapeCString(gameTitle)}\"))");
+        _writer.OpenBlock($"if (!psps_video_init_scaled(\"{CTypeMapper.EscapeCString(gameTitle)}\", {_symbols.WindowScale}))");
         _writer.WriteLine("return 1;");
         _writer.CloseBlock();
         _writer.WriteLine("psps_input_init();");

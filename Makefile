@@ -11,6 +11,9 @@ SFO              := $(BUILD_DIR)/PARAM.SFO
 EBOOT            := $(BUILD_DIR)/EBOOT.PBP
 
 PSP_EBOOT_TITLE  ?= PSPScript Game
+PSP_GAME_ID      ?= PSPS00001
+PSP_APP_VER      ?= 01.00
+PSP_MEMSIZE      ?= 1
 PSP_FW_VERSION   ?= 600
 
 # Optional PBP metadata assets (NULL when unused)
@@ -82,8 +85,10 @@ $(ELF): $(OBJ)
 $(PRX): $(ELF)
 	$(PRXGEN) $(ELF) $(PRX)
 
-$(SFO): | $(BUILD_DIR)
-	$(MKSFO) -d MEMSIZE=1 "$(PSP_EBOOT_TITLE)" $(SFO)
+MKSFO_MEM_FLAG   := $(if $(filter 1,$(PSP_MEMSIZE)),-d MEMSIZE=1,)
+
+$(SFO): $(SRC) | $(BUILD_DIR)
+	$(MKSFO) $(MKSFO_MEM_FLAG) -s DISC_ID=$(PSP_GAME_ID) -s APP_VER=$(PSP_APP_VER) "$(PSP_EBOOT_TITLE)" $(SFO)
 
 $(EBOOT): $(PRX) $(SFO)
 	$(PACK_PBP) $(EBOOT) $(SFO) $(PSP_EBOOT_ICON) $(PSP_EBOOT_ICON1) \

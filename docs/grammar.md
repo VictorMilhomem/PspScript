@@ -17,8 +17,8 @@ ImportDecl     ::= "import" (STRING | IDENT)
 
 // Global EBOOT configuration and memory budget
 GameConfig     ::= "game" STRING "{" ConfigField* "}"
-ConfigField    ::= IDENT ":" (INT | SIZE_LITERAL | STRING | IDENT) ","?
-// E.g.: ram_budget: 16MB, fps: 60, entry: Match
+ConfigField    ::= IDENT ":" (INT | SIZE_LITERAL | STRING | BOOL | IDENT) ","?
+// E.g.: id: "PSPS00001", version: "01.00", ram_budget: 16MB, extra_ram: true, fps: 60, entry: Match, icon: "icon.png"
 
 // Assets processed at compile time
 AssetDecl      ::= "asset" IDENT "=" IDENT "(" STRING ("," ArgList)? ")"

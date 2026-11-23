@@ -15,13 +15,15 @@ public record ImportDecl(string Path) : TopDecl;
 
 public record GameConfigDecl(
     string Title,
-    IReadOnlyDictionary<string, ConfigValue> Settings
+    IReadOnlyDictionary<string, ConfigValue> Settings,
+    string? SourceDirectory = null
 ): TopDecl;
 
 public abstract record ConfigValue;
 public record IntConfigValue(int Value): ConfigValue;
 public record SizeConfigValue(long Bytes): ConfigValue; // Normalized from KB/MB
 public record StringConfigValue(string Value): ConfigValue;
+public record BoolConfigValue(bool Value): ConfigValue;
 public record IdentConfigValue(string Name): ConfigValue;
 
 public record AssetDecl(

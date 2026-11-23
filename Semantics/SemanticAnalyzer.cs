@@ -187,28 +187,140 @@ public sealed class SemanticAnalyzer
         }
     }
 
+    private static readonly string[] ValidGameConfigKeys =
+    [
+        "ram_budget", "fps", "entry", "id", "version",
+        "extra_ram", "window_scale", "icon", "background", "overlay"
+    ];
+
     private void ExtractGameConfigSettings(GameConfigDecl gameConfig)
     {
-        if (gameConfig.Settings.TryGetValue("ram_budget", out var ramSetting))
+        foreach (var (key, value) in gameConfig.Settings)
         {
-            switch (ramSetting)
+            switch (key)
             {
-                case SizeConfigValue sizeVal:
-                    if (sizeVal.Bytes <= 0)
-                        ReportError("'ram_budget' must be greater than 0 bytes.", gameConfig.Span);
-                    else
-                        _symbols.ConfiguredRamBudgetBytes = sizeVal.Bytes;
+                case "ram_budget":
+                    switch (value)
+                    {
+                        case SizeConfigValue sizeVal:
+                            if (sizeVal.Bytes <= 0)
+                                ReportError("'ram_budget' must be greater than 0 bytes.", gameConfig.Span);
+                            else
+                                _symbols.ConfiguredRamBudgetBytes = sizeVal.Bytes;
+                            break;
+
+                        case IntConfigValue intVal:
+                            if (intVal.Value <= 0)
+                                ReportError("'ram_budget' must be greater than 0.", gameConfig.Span);
+                            else
+                                _symbols.ConfiguredRamBudgetBytes = intVal.Value;
+                            break;
+
+                        default:
+                            ReportError("'ram_budget' in game config must be a size literal (e.g., 16MB) or integer.", gameConfig.Span);
+                            break;
+                    }
                     break;
 
-                case IntConfigValue intVal:
-                    if (intVal.Value <= 0)
-                        ReportError("'ram_budget' must be greater than 0.", gameConfig.Span);
+                case "fps":
+                    if (value is IntConfigValue fpsVal && fpsVal.Value > 0)
+                    {
+                        // Validated positive target FPS
+                    }
                     else
-                        _symbols.ConfiguredRamBudgetBytes = intVal.Value;
+                    {
+                        ReportError("'fps' in game config must be a positive integer (e.g., 60).", gameConfig.Span);
+                    }
+                    break;
+
+                case "entry":
+                    // Validated in ResolveGameEntryState() after all states are collected
+                    break;
+
+                case "id":
+                    if (value is StringConfigValue idVal &&
+                        idVal.Value.Length is >= 1 and <= 9 &&
+                        idVal.Value.All(static c => (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')))
+                    {
+                        _symbols.GameId = idVal.Value;
+                    }
+                    else
+                    {
+                        ReportError("'id' in game config must be a 1-9 character uppercase alphanumeric string (e.g., \"PSPS00001\").", gameConfig.Span);
+                    }
+                    break;
+
+                case "version":
+                    if (value is StringConfigValue verVal && !string.IsNullOrWhiteSpace(verVal.Value))
+                    {
+                        _symbols.GameVersion = verVal.Value.Trim();
+                    }
+                    else
+                    {
+                        ReportError("'version' in game config must be a non-empty string (e.g., \"01.00\").", gameConfig.Span);
+                    }
+                    break;
+
+                case "extra_ram":
+                    if (value is BoolConfigValue extraRamVal)
+                    {
+                        _symbols.ExtraRam = extraRamVal.Value;
+                    }
+                    else
+                    {
+                        ReportError("'extra_ram' in game config must be a boolean ('true' or 'false').", gameConfig.Span);
+                    }
+                    break;
+
+                case "window_scale":
+                    if (value is IntConfigValue scaleVal && scaleVal.Value is >= 1 and <= 4)
+                    {
+                        _symbols.WindowScale = scaleVal.Value;
+                    }
+                    else
+                    {
+                        ReportError("'window_scale' in game config must be an integer between 1 and 4.", gameConfig.Span);
+                    }
+                    break;
+
+                case "icon":
+                    if (value is StringConfigValue iconVal && !string.IsNullOrWhiteSpace(iconVal.Value))
+                    {
+                        _symbols.IconPath = iconVal.Value.Trim();
+                    }
+                    else
+                    {
+                        ReportError("'icon' in game config must be a non-empty PNG file path string.", gameConfig.Span);
+                    }
+                    break;
+
+                case "background":
+                    if (value is StringConfigValue bgVal && !string.IsNullOrWhiteSpace(bgVal.Value))
+                    {
+                        _symbols.BackgroundPath = bgVal.Value.Trim();
+                    }
+                    else
+                    {
+                        ReportError("'background' in game config must be a non-empty PNG file path string.", gameConfig.Span);
+                    }
+                    break;
+
+                case "overlay":
+                    if (value is StringConfigValue ovVal && !string.IsNullOrWhiteSpace(ovVal.Value))
+                    {
+                        _symbols.OverlayPath = ovVal.Value.Trim();
+                    }
+                    else
+                    {
+                        ReportError("'overlay' in game config must be a non-empty PNG file path string.", gameConfig.Span);
+                    }
                     break;
 
                 default:
-                    ReportError("'ram_budget' in game config must be a size literal (e.g., 16MB) or integer.", gameConfig.Span);
+                    ReportError(
+                        $"Unknown game config key '{key}'. Valid keys: {string.Join(", ", ValidGameConfigKeys)}.",
+                        gameConfig.Span
+                    );
                     break;
             }
         }

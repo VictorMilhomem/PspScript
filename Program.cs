@@ -176,16 +176,37 @@ if (!buildEboot)
 }
 
 string gameTitle = model.Symbols.GameConfig?.Title ?? Path.GetFileNameWithoutExtension(inputPath);
-Console.WriteLine($"[4/4] Building PlayStation Portable EBOOT.PBP (Title: \"{gameTitle}\") via docker-compose.yml...");
+string buildDir = string.IsNullOrEmpty(outDir) ? "build" : outDir;
+string? configBaseDir = model.Symbols.GameConfig?.SourceDirectory ?? inputDir;
 
-int ebootExit = RunComposeBuild(gameTitle);
+if (!PspXmbStager.TryStageXmbPng(model.Symbols.IconPath, "icon", "ICON0.PNG", 144, 80, configBaseDir, inputDir, buildDir, out string stagedIcon))
+    return 1;
+if (!PspXmbStager.TryStageXmbPng(model.Symbols.BackgroundPath, "background", "PIC1.PNG", 480, 272, configBaseDir, inputDir, buildDir, out string stagedPic1))
+    return 1;
+if (!PspXmbStager.TryStageXmbPng(model.Symbols.OverlayPath, "overlay", "PIC0.PNG", 310, 180, configBaseDir, inputDir, buildDir, out string stagedPic0))
+    return 1;
+
+Console.WriteLine($"[4/4] Building PlayStation Portable EBOOT.PBP (Title: \"{gameTitle}\", ID: {model.Symbols.GameId}, v{model.Symbols.GameVersion}) via docker-compose.yml...");
+
+var pbpEnv = new Dictionary<string, string>(StringComparer.Ordinal)
+{
+    ["PSP_EBOOT_TITLE"]  = gameTitle,
+    ["PSP_GAME_ID"]      = model.Symbols.GameId,
+    ["PSP_APP_VER"]      = model.Symbols.GameVersion,
+    ["PSP_MEMSIZE"]      = model.Symbols.ExtraRam ? "1" : "0",
+    ["PSP_EBOOT_ICON"]   = stagedIcon,
+    ["PSP_EBOOT_PIC1"]   = stagedPic1,
+    ["PSP_EBOOT_UNKPNG"] = stagedPic0
+};
+
+int ebootExit = RunComposeBuild(pbpEnv);
 if (ebootExit != 0)
 {
     Console.Error.WriteLine($"Error: EBOOT.PBP container build failed with exit code {ebootExit}.");
     return ebootExit;
 }
 
-string ebootPath = Path.Combine(string.IsNullOrEmpty(outDir) ? "build" : outDir, "EBOOT.PBP");
+string ebootPath = Path.Combine(buildDir, "EBOOT.PBP");
 if (File.Exists(ebootPath))
 {
     var info = new FileInfo(ebootPath);
@@ -294,13 +315,8 @@ static void PrintAstSummary(ProgramNode program, SemanticModel model)
     }
 }
 
-static int RunComposeBuild(string gameTitle)
+static int RunComposeBuild(IDictionary<string, string> env)
 {
-    var env = new Dictionary<string, string>(StringComparer.Ordinal)
-    {
-        ["PSP_EBOOT_TITLE"] = gameTitle
-    };
-
     if (IsCommandAvailable("podman-compose"))
     {
         return RunProcess("podman-compose", "run --rm psp-builder", env);

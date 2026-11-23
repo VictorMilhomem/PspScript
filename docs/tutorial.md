@@ -124,19 +124,37 @@ import "actors/paddles"      // '.psps' extension is optional
 
 ### Game Configuration (`game`)
 
-Every `.psps` program can declare a `game` block to configure the PSP `EBOOT.PBP` title, target frame rate, and static RAM budget:
+Every `.psps` program can declare a `game` block to configure the PSP `EBOOT.PBP` metadata, XMB artwork, static RAM budget, and desktop preview settings:
 
 ```pspscript
 game "StarDust PSP" {
+    id: "STDS00001",
+    version: "01.00",
     ram_budget: 16MB,
+    extra_ram: true,
     fps: 60,
-    entry: Gameplay
+    entry: Gameplay,
+    window_scale: 2,
+    icon: "assets/icon.png",
+    background: "assets/bg.png",
+    overlay: "assets/overlay.png"
 }
 ```
 
-- **Title**: Stamped automatically into `PARAM.SFO` when building `EBOOT.PBP` and used as the desktop window title.
-- **`ram_budget`**: Accepts size literals (`KB` or `MB`, e.g., `512KB`, `16MB`). During semantic analysis, the compiler sums the static byte size of all globals, state fields, fixed arrays, and actor pools and fails compilation if the budget is exceeded.
-- **`entry`**: Explicitly specifies the starting `state` entered at boot (accepts either an identifier like `entry: Gameplay` or a quoted string `entry: "Gameplay"`). Validated at compile time so typos fail before code generation; if omitted, the first declared `state` is used.
+| Key | Value Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | `string` (1–9 `A-Z0-9`) | `"PSPS00001"` | PSP `DISC_ID` in `PARAM.SFO` and save data folder ID (`PSPS_SAVE_GAME_ID`) |
+| `version` | `string` | `"01.00"` | `APP_VER` stamped into `PARAM.SFO` |
+| `ram_budget` | size (`KB`/`MB`) or `int` | `16MB` | Static RAM ceiling verified at compile time |
+| `extra_ram` | `bool` | `true` | Enables `MEMSIZE=1` (64 MB on PSP-2000+); set `false` for strict 32 MB PSP-1000 compatibility |
+| `fps` | positive `int` | `60` | Target frame rate |
+| `entry` | state `IDENT` or `string` | First `state` | Starting game state entered at boot (validated at compile time) |
+| `window_scale` | `int` (`1..4`) | `2` | Desktop SDL2 preview window scale (`psps_video_init_scaled`) |
+| `icon` | PNG path `string` | `NULL` | XMB `ICON0.PNG` (recommended `144×80` PNG) |
+| `background` | PNG path `string` | `NULL` | XMB `PIC1.PNG` (recommended `480×272` PNG) |
+| `overlay` | PNG path `string` | `NULL` | XMB `PIC0.PNG` (recommended `310×180` PNG) |
+
+Unknown keys in `game { ... }` fail at compile time so typos are caught immediately.
 
 ---
 

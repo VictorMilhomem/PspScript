@@ -556,9 +556,13 @@ public static class PspParser
                 return new IntConfigValue((int)val);
             });
 
+        var boolConfigValue = Keyword("true").Then<ConfigValue>(static (context, _) => new BoolConfigValue(true))
+            .Or(Keyword("false").Then<ConfigValue>(static (context, _) => new BoolConfigValue(false)));
+
         var configValue = OneOf(
             stringLiteral.Then<ConfigValue>(static (context, s) => new StringConfigValue(s)),
             sizeOrIntConfig,
+            boolConfigValue,
             rawIdentifier.Then<ConfigValue>(static (context, id) => new IdentConfigValue(id))
         );
 

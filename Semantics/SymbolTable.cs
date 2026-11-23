@@ -161,6 +161,13 @@ public sealed class SymbolTable
     public GameConfigDecl? GameConfig { get; set; }
     public long? ConfiguredRamBudgetBytes { get; set; }
     public string? EntryStateName { get; set; }
+    public string GameId { get; set; } = "PSPS00001";
+    public string GameVersion { get; set; } = "01.00";
+    public bool ExtraRam { get; set; } = true;
+    public int WindowScale { get; set; } = 2;
+    public string? IconPath { get; set; }
+    public string? BackgroundPath { get; set; }
+    public string? OverlayPath { get; set; }
 
     public Dictionary<string, AssetSymbol> Assets { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, MessageSymbol> Messages { get; } = new(StringComparer.Ordinal);

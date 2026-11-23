@@ -274,7 +274,7 @@ public sealed partial class CCodeGenerator
         }
 
         string saveTitle = _symbols.GameConfig?.Title ?? "PSPScript Game";
-        _writer.WriteLine($"#define PSPS_SAVE_GAME_ID        \"PSPS00001\"");
+        _writer.WriteLine($"#define PSPS_SAVE_GAME_ID        \"{CTypeMapper.EscapeCString(_symbols.GameId)}\"");
         _writer.WriteLine($"#define PSPS_SAVE_TITLE          \"{CTypeMapper.EscapeCString(saveTitle)}\"");
         _writer.WriteLine();
 
