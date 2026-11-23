@@ -291,9 +291,14 @@ bool psps_video_init_scaled(const char* title, int window_scale) {
         return true;
     }
 
+#if defined(__PSP__)
+    /* PSP hardware framebuffer is strictly 480x272; window_scale applies to desktop previews only */
+    window_scale = 1;
+#else
     if (window_scale < 1) {
         window_scale = 1;
     }
+#endif
 
     if ((SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO) == 0) {
         if (SDL_InitSubSystem(SDL_INIT_VIDEO) < 0) {
