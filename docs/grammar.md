@@ -67,7 +67,8 @@ Block          ::= "{" Stmt* "}"
 Stmt           ::= LocalVarDecl
                  | AssignStmt
                  | IfStmt
-                 | WhileStmt
+                 | ForStmt
+                 | ForRangeStmt
                  | ForEachStmt
                  | ReturnStmt
                  | SendStmt
@@ -94,7 +95,8 @@ ForEachStmt    ::= "each" IDENT "in" IDENT Block
 // E.g.: each b in Bullet { ... }
 
 IfStmt         ::= "if" Expr Block ("else" (IfStmt | Block))?
-WhileStmt      ::= "while" Expr Block
+ForStmt        ::= "for" Expr Block
+ForRangeStmt   ::= "for" IDENT "in" Expr ".." Expr Block
 ReturnStmt     ::= "return" Expr?
 AssignStmt     ::= Expr ("=" | "+=" | "-=" | "*=" | "/=") Expr
 ExprStmt       ::= Expr

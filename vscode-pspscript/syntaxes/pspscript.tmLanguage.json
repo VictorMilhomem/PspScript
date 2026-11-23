@@ -171,7 +171,7 @@
         },
         {
           "name": "keyword.control.flow.pspscript",
-          "match": "\\b(if|else|while|each|in|return|goto)\\b"
+          "match": "\\b(if|else|for|each|in|return|goto)\\b"
         },
         {
           "name": "keyword.control.actor.pspscript",

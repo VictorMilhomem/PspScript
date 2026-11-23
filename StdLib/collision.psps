@@ -26,13 +26,6 @@ fn aabb_contains_point(box: AABB, point: vec2) -> bool {
            point.y <= box.pos.y + box.size.y
 }
 
-fn rect_overlaps(a: rect, b: rect) -> bool {
-    return a.x < b.x + b.w &&
-           a.x + a.w > b.x &&
-           a.y < b.y + b.h &&
-           a.y + a.h > b.y
-}
-
 fn circle_overlaps(a: Circle, b: Circle) -> bool {
     var dx: f32 = a.center.x - b.center.x
     var dy: f32 = a.center.y - b.center.y

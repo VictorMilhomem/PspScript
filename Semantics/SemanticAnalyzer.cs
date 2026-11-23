@@ -830,8 +830,12 @@ public sealed class SemanticAnalyzer
                 ValidateIfStmt(ifStmt, scope);
                 break;
 
-            case WhileStmt whileStmt:
-                ValidateWhileStmt(whileStmt, scope);
+            case ForStmt forStmt:
+                ValidateForStmt(forStmt, scope);
+                break;
+
+            case ForRangeStmt forRangeStmt:
+                ValidateForRangeStmt(forRangeStmt, scope);
                 break;
 
             case ForEachStmt forEachStmt:
@@ -962,6 +966,11 @@ public sealed class SemanticAnalyzer
         }
 
         var targetType = ResolveExpr(assign.Target, scope, expectedType: null);
+        if (IsReadOnlyComputedProperty(assign.Target, out string? readOnlyProp))
+        {
+            ReportError($"Cannot assign to read-only computed property '{readOnlyProp}'.", assign.Span);
+        }
+
         var valueType = ResolveExpr(assign.Value, scope, expectedType: targetType);
 
         if (targetType.IsError || valueType.IsError)
@@ -1021,16 +1030,63 @@ public sealed class SemanticAnalyzer
         _model.RecordType(ifStmt, ResolvedType.Void);
     }
 
-    private void ValidateWhileStmt(WhileStmt whileStmt, LexicalScope scope)
+    private bool IsReadOnlyComputedProperty(Expr target, out string? propertyName)
     {
-        var condType = ResolveExpr(whileStmt.Condition, scope, expectedType: ResolvedType.Bool);
-        if (!condType.IsError && condType != ResolvedType.Bool)
+        Expr? current = target;
+        while (current is FieldAccessExpr fieldAccess)
         {
-            ReportError($"'while' condition must evaluate to 'bool', got '{condType}'.", whileStmt.Span);
+            var ownerType = _model.GetTypeOrDefault(fieldAccess.Target);
+            if (ownerType == ResolvedType.Rect && fieldAccess.FieldName == "center")
+            {
+                propertyName = "rect.center";
+                return true;
+            }
+            current = fieldAccess.Target;
         }
 
-        ValidateBlockStmt(whileStmt.Body, scope, createChildScope: true);
-        _model.RecordType(whileStmt, ResolvedType.Void);
+        propertyName = null;
+        return false;
+    }
+
+    private void ValidateForStmt(ForStmt forStmt, LexicalScope scope)
+    {
+        var condType = ResolveExpr(forStmt.Condition, scope, expectedType: ResolvedType.Bool);
+        if (!condType.IsError && condType != ResolvedType.Bool)
+        {
+            ReportError($"'for' condition must evaluate to 'bool', got '{condType}'.", forStmt.Span);
+        }
+
+        ValidateBlockStmt(forStmt.Body, scope, createChildScope: true);
+        _model.RecordType(forStmt, ResolvedType.Void);
+    }
+
+    private void ValidateForRangeStmt(ForRangeStmt forRangeStmt, LexicalScope scope)
+    {
+        var startType = ResolveExpr(forRangeStmt.Start, scope, expectedType: ResolvedType.Int);
+        if (!startType.IsError && !startType.IsInteger)
+        {
+            ReportError($"'for' range start must be an integer type, got '{startType}'.", forRangeStmt.Start.Span);
+        }
+
+        var endType = ResolveExpr(forRangeStmt.End, scope, expectedType: ResolvedType.Int);
+        if (!endType.IsError && !endType.IsInteger)
+        {
+            ReportError($"'for' range end must be an integer type, got '{endType}'.", forRangeStmt.End.Span);
+        }
+
+        var loopScope = scope.CreateChild();
+        loopScope.TryDeclareLocal(
+            new VariableSymbol(
+                Name: forRangeStmt.IteratorName,
+                Scope: MemoryScope.Stack,
+                Type: ResolvedType.Int,
+                IsReadOnly: true,
+                Declaration: forRangeStmt
+            )
+        );
+
+        _model.RecordType(forRangeStmt, ResolvedType.Int);
+        ValidateBlockStmt(forRangeStmt.Body, loopScope, createChildScope: false);
     }
 
     private void ValidateForEachStmt(ForEachStmt forEachStmt, LexicalScope scope)
@@ -1589,6 +1645,8 @@ public sealed class SemanticAnalyzer
             case PrimitiveType { Kind: PrimitiveKind.Rect }:
                 if (field is "x" or "y" or "w" or "h")
                     return ResolvedType.F32;
+                if (field == "center")
+                    return ResolvedType.Vec2;
                 break;
 
             case PrimitiveType { Kind: PrimitiveKind.Color }:
@@ -1783,6 +1841,49 @@ public sealed class SemanticAnalyzer
                     }
                     _model.RecordType(memberAccess, new FunctionType([receiverType], ResolvedType.F32));
                     return ResolvedType.F32;
+            }
+        }
+
+        // Built-in methods on 'rect'
+        if (receiverType == ResolvedType.Rect)
+        {
+            switch (methodName)
+            {
+                case "overlaps":
+                    if (callExpr.Arguments.Count != 1)
+                    {
+                        ReportError($"Method 'rect.overlaps(other)' takes 1 argument, got {callExpr.Arguments.Count}.", callExpr.Span);
+                        foreach (var arg in callExpr.Arguments)
+                            ResolveExpr(arg, scope, expectedType: null);
+                    }
+                    else
+                    {
+                        var argType = ResolveExpr(callExpr.Arguments[0], scope, expectedType: ResolvedType.Rect);
+                        if (!ResolvedType.IsAssignableTo(argType, ResolvedType.Rect))
+                        {
+                            ReportError($"Argument to 'rect.overlaps' must be 'rect', got '{argType}'.", callExpr.Arguments[0].Span);
+                        }
+                    }
+                    _model.RecordType(memberAccess, new FunctionType([ResolvedType.Rect], ResolvedType.Bool));
+                    return ResolvedType.Bool;
+
+                case "contains":
+                    if (callExpr.Arguments.Count != 1)
+                    {
+                        ReportError($"Method 'rect.contains(point)' takes 1 argument, got {callExpr.Arguments.Count}.", callExpr.Span);
+                        foreach (var arg in callExpr.Arguments)
+                            ResolveExpr(arg, scope, expectedType: null);
+                    }
+                    else
+                    {
+                        var argType = ResolveExpr(callExpr.Arguments[0], scope, expectedType: ResolvedType.Vec2);
+                        if (!ResolvedType.IsAssignableTo(argType, ResolvedType.Vec2))
+                        {
+                            ReportError($"Argument to 'rect.contains' must be 'vec2', got '{argType}'.", callExpr.Arguments[0].Span);
+                        }
+                    }
+                    _model.RecordType(memberAccess, new FunctionType([ResolvedType.Vec2], ResolvedType.Bool));
+                    return ResolvedType.Bool;
             }
         }
 

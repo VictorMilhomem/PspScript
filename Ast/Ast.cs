@@ -174,8 +174,21 @@ public record IfStmt(
     Stmt? ElseBranch
 ): Stmt;
 
-public record WhileStmt(
+/// <summary>
+/// Go-style conditional loop: for cond { ... }
+/// </summary>
+public record ForStmt(
     Expr Condition,
+    BlockStmt Body
+) : Stmt;
+
+/// <summary>
+/// Exclusive integer range loop: for i in start..end { ... }
+/// </summary>
+public record ForRangeStmt(
+    string IteratorName,
+    Expr Start,
+    Expr End,
     BlockStmt Body
 ) : Stmt;
 

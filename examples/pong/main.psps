@@ -9,7 +9,6 @@ game "PSP Pong" {
 }
 
 import "shared/constants.psps"
-import "shared/math.psps"
 import "actors/button.psps"
 import "actors/paddles.psps"
 import "actors/ball.psps"

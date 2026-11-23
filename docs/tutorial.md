@@ -6,6 +6,7 @@ Welcome to **PSPScript** — a domain-specific game scripting language designed 
 
 ## Table of Contents
 
+- [What's New in v0.2 (Migrating from v0.1)](#whats-new-in-v02-migrating-from-v01)
 1. [Why PSPScript? (The PSP Hardware Model)](#1-why-pspscript-the-psp-hardware-model)
 2. [Quick Start & CLI Workflow](#2-quick-start--cli-workflow)
 3. [Game Configuration, Imports & Static Memory Budget](#3-game-configuration-imports--static-memory-budget)
@@ -20,6 +21,46 @@ Welcome to **PSPScript** — a domain-specific game scripting language designed 
 12. [2D Camera, Tilemaps, Bitmap Fonts & Save Data](#12-2d-camera-tilemaps-bitmap-fonts--save-data)
 13. [The Deterministic 4-Phase Frame Loop](#13-the-deterministic-4-phase-frame-loop)
 14. [Complete Playable Examples](#14-complete-playable-examples)
+
+---
+
+## What's New in v0.2 (Migrating from v0.1)
+
+PSPScript **v0.2** streamlines everyday PSP game code with unified `for` loops, built-in `rect` geometry helpers, bare module imports, and a bundled Standard Library (`StdLib/`).
+
+| Area | v0.1 | v0.2 |
+| :--- | :--- | :--- |
+| **Loops** *(breaking)* | `while cond { ... }` | `for cond { ... }` (Go-style) and `for i in start..end { ... }` (`while` removed) |
+| **Imports** | Relative paths only (`import "shared/math.psps"`) | Adds bare module imports (`import input`, `import collision`, `import "collision"`) with local override & `StdLib/` fallback |
+| **Standard Library** | Manual boilerplate for button bitmasks & 2D shapes | Bundled zero-allocation `StdLib/input.psps` (`BTN_*`, `dpad_vector()`) and `StdLib/collision.psps` (`AABB`, `Circle`) |
+| **`rect` Geometry** | Manual AABB math (`check_aabb(...)`) | Built-in `r.overlaps(other)`, `r.contains(point)`, and read-only `r.center` |
+| **Imported Assets** | Resolved relative to entry directory only | Resolves relative to the declaring file first, then falls back to entry directory |
+
+### Quick Migration Examples
+
+```pspscript
+// v0.1: manual loop, manual button bitmasks, manual AABB helper
+global var BTN_LEFT: int = 64
+var y: f32 = 20.0
+while y < 250.0 {
+    draw_rect({ 239.0, y, 2.0, 10.0 }, #263859)
+    y += 20.0
+}
+if check_aabb(ax, ay, aw, ah, bx, by, bw, bh) { ... }
+
+// v0.2: StdLib bare import, range `for`, and built-in `rect` helpers
+import input
+
+var dir: vec2 = dpad_vector()
+for i in 0..12 {
+    draw_rect({ 239.0, 20.0 + (i * 20), 2.0, 10.0 }, #263859)
+}
+var a: rect = { ax, ay, aw, ah }
+var b: rect = { bx, by, bw, bh }
+if a.overlaps(b) {
+    var mid: vec2 = a.center
+}
+```
 
 ---
 
@@ -128,6 +169,12 @@ var offset: vec2 = pos - { 240.0, 136.0 }
 var dist: f32 = offset.length()
 var unit: vec2 = offset.normalized()
 var alignment: f32 = unit.dot({ 1.0, 0.0 })
+
+// Built-in rect methods & read-only center property
+var other_box: rect = { 24.0, 44.0, 16.0, 16.0 }
+var hit: bool = box.overlaps(other_box)
+var inside: bool = box.contains(pos)
+var mid: vec2 = box.center               // Read-only computed property ({ x + w * 0.5, y + h * 0.5 })
 ```
 
 ### Native PSP Colors (`color`)
@@ -405,22 +452,32 @@ When `goto NextState` executes:
 PSPScript supports familiar, semicolon-free control flow and typed functions:
 
 ```pspscript
-fn check_aabb(ax: f32, ay: f32, aw: f32, ah: f32, bx: f32, by: f32, bw: f32, bh: f32) -> bool {
-    return (ax < bx + bw) && (ax + aw > bx) && (ay < by + bh) && (ay + ah > by)
+fn draw_dashed_net() {
+    for i in 0..12 {
+        draw_rect({ 239.0, 20.0 + (i * 20), 2.0, 10.0 }, #263859)
+    }
 }
 
-fn draw_dashed_net() {
-    var y: f32 = 20.0
-    while y < 250.0 {
-        draw_rect({ 239.0, y, 2.0, 10.0 }, #263859)
-        y += 20.0
+fn sum_scores(scores: [8]int) -> int {
+    var total: int = 0
+    for i in 0..scores.len {
+        total += scores[i]
     }
+    return total
+}
+
+fn wait_until_edge(x: f32) -> f32 {
+    for x < 250.0 {
+        x += 20.0
+    }
+    return x
 }
 ```
 
 - `if condition { ... } else if other { ... } else { ... }`
-- `while condition { ... }`
-- `each item in PoolName { ... }`
+- `for condition { ... }` — Go-style conditional loop (`condition` must be `bool`)
+- `for i in start..end { ... }` — exclusive integer range loop (`i` is an immutable, block-scoped `int`)
+- `each item in PoolName { ... }` — safe active-slot iteration over actor pools
 - `return` or `return expr` (non-void functions must return a value on all code paths)
 - Functions without `-> Type` default to `void`.
 
@@ -470,7 +527,32 @@ PSP button bitmasks (matching `Runtime/psps_input.h`):
 
 ### Standard Library Modules (`StdLib/`)
 
-PSPScript ships with zero-allocation standard library modules written in pure `f32` PSPScript, imported by bare name (`import collision` or `import "collision"`):
+PSPScript ships with zero-allocation standard library modules written in pure `f32` PSPScript, imported by bare name (`import input`, `import collision`, or quoted `import "collision"`):
+
+#### `input` (`StdLib/input.psps`)
+
+Provides all PSP button bitmask constants (`BTN_CROSS`, `BTN_CIRCLE`, `BTN_SQUARE`, `BTN_TRIANGLE`, `BTN_UP`, `BTN_DOWN`, `BTN_LEFT`, `BTN_RIGHT`, `BTN_L`, `BTN_R`, `BTN_START`, `BTN_SELECT`) and a D-Pad vector helper:
+
+| Symbol | Type / Signature | Description |
+| :--- | :--- | :--- |
+| `BTN_*` | `global var ...: int` | PSP controller button bitmasks matching `Runtime/psps_input.h` |
+| `dpad_vector` | `() -> vec2` | Returns unnormalized directional vector (`-1.0..1.0` per axis) from held D-Pad buttons |
+
+```pspscript
+import input
+
+actor Player {
+    pos: vec2 = { 216.0, 112.0 }
+    speed: f32 = 140.0
+
+    update(dt: f32) {
+        temp var dir: vec2 = dpad_vector()
+        if dir.length() > 0.0 {
+            pos += dir.normalized() * speed * dt
+        }
+    }
+}
+```
 
 #### `collision` (`StdLib/collision.psps`)
 
@@ -478,13 +560,12 @@ Value structs:
 - `AABB { pos: vec2 = { 0.0, 0.0 }, size: vec2 = { 0.0, 0.0 } }`
 - `Circle { center: vec2 = { 0.0, 0.0 }, radius: f32 = 0.0 }`
 
-Pure collision queries:
+Pure collision queries (for built-in `rect` overlap/containment, use `r.overlaps(other)` and `r.contains(point)` directly):
 
 | Function | Signature | Description |
 | :--- | :--- | :--- |
 | `aabb_overlaps` | `(a: AABB, b: AABB) -> bool` | Axis-aligned bounding box overlap test |
 | `aabb_contains_point` | `(box: AABB, point: vec2) -> bool` | Inclusive point-in-AABB test |
-| `rect_overlaps` | `(a: rect, b: rect) -> bool` | Overlap test for built-in `rect` values |
 | `circle_overlaps` | `(a: Circle, b: Circle) -> bool` | Squared-distance circle-circle overlap test |
 | `circle_aabb_overlaps` | `(c: Circle, box: AABB) -> bool` | Closest-point circle-AABB overlap test |
 
@@ -613,9 +694,9 @@ Every compiled PSPScript program executes the same predictable loop per frame:
 
 Explore all three modular PSPScript projects in `examples/`:
 
-1. **[examples/pong/main.psps](../examples/pong/main.psps)** — Full Pong game with a message-driven `MainMenu` (`Button[4]`, `ButtonFocus`, `ButtonPress`), selectable CPU difficulty, `Ball[4]` pool, `PaddleBounce` messages, bitmap font HUD, and `save_game()` / `load_game()`.
-2. **[examples/sprite/main.psps](../examples/sprite/main.psps)** — Static PNG sprite baking (`Free_Chicken_House.png`, `Egg_item.png`), D-Pad movement with `temp var`, tint cycling via `CycleTint` message, and pooled bobbing `Egg[8]` actors.
-3. **[examples/anim/main.psps](../examples/anim/main.psps)** — 4-directional spritesheet animation (`Basic Charakter Spritesheet.png`, `Free Chicken Sprites.png`) using `draw_subsprite`, auto-ticking `timer` frame clocks, pooled `Chicken[6]` AI + `Startle` message, and 2D camera tracking.
+1. **[examples/pong/main.psps](../examples/pong/main.psps)** — Full Pong game with `import input`, built-in `rect.overlaps(...)` & `rect.center`, range `for i in 0..12`, message-driven `MainMenu` (`Button[4]`, `ButtonFocus`, `ButtonPress`), selectable CPU difficulty, `Ball[4]` pool, `PaddleBounce` messages, bitmap font HUD, and `save_game()` / `load_game()`.
+2. **[examples/sprite/main.psps](../examples/sprite/main.psps)** — Static PNG sprite baking (`Free_Chicken_House.png`, `Egg_item.png`), `import input` + `dpad_vector()` with `temp var`, tint cycling via `CycleTint` message, and pooled bobbing `Egg[8]` actors.
+3. **[examples/anim/main.psps](../examples/anim/main.psps)** — 4-directional spritesheet animation (`Basic Charakter Spritesheet.png`, `Free Chicken Sprites.png`) using `import input` + `dpad_vector()`, `draw_subsprite`, auto-ticking `timer` frame clocks, pooled `Chicken[6]` AI + `Startle` message, and 2D camera tracking.
 
 ```bash
 # Build PSP EBOOT.PBP for any example

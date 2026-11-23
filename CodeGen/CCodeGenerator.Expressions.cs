@@ -180,6 +180,11 @@ public sealed partial class CCodeGenerator
             return $"{actorRef.ActorName}_resolve_mut({handleExpr})->{field}";
         }
 
+        if (targetType == ResolvedType.Rect && field == "center")
+        {
+            return $"psps_rect_center({EmitExpr(fieldExpr.Target, ctx)})";
+        }
+
         if (targetType == ResolvedType.Color && field is "r" or "g" or "b" or "a")
         {
             return $"psps_color_{field}({EmitExpr(fieldExpr.Target, ctx)})";
@@ -223,6 +228,18 @@ public sealed partial class CCodeGenerator
                     "dot" when callExpr.Arguments.Count == 1 =>
                         $"{prefix}_dot({receiverExpr}, {EmitExpr(callExpr.Arguments[0], ctx)})",
                     _ => "0.0f"
+                };
+            }
+
+            if (receiverType == ResolvedType.Rect)
+            {
+                return method switch
+                {
+                    "overlaps" when callExpr.Arguments.Count == 1 =>
+                        $"psps_rect_overlaps({receiverExpr}, {EmitExpr(callExpr.Arguments[0], ctx)})",
+                    "contains" when callExpr.Arguments.Count == 1 =>
+                        $"psps_rect_contains({receiverExpr}, {EmitExpr(callExpr.Arguments[0], ctx)})",
+                    _ => "false"
                 };
             }
 

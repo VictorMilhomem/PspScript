@@ -1,4 +1,4 @@
-# PSPScript (v0.1)
+# PSPScript (v0.2-dev)
 
 A C# (.NET 10) transpiler for **PSPScript (`.psps`)**, a domain-specific game scripting language engineered for **Sony PlayStation Portable (PSP)** homebrew development. It compiles high-level, game-oriented scripts down to clean, static, zero-heap-allocation **C99** targeting **PSPSDK (`psp-gcc` + `psp-prxgen`)** and a modular STB-style **SDL2** runtime (`EBOOT.PBP` for PSP/PPSSPP, plus native Linux desktop previews).
 
@@ -114,7 +114,7 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 | `Semantics/` | Two-pass semantic analyzer, symbol table, type checker, entry state & static RAM budget validator |
 | `CodeGen/` | Modular C99 code generator (`CSourceWriter`, `CTypeMapper`, `AssetBaker`, `Actors`, `States`, `Statements`, `Expressions`) |
 | `Runtime/` | Zero-heap STB-style C99 headers (`psps_runtime.h`, `psps_types.h`, `psps_arena.h`, `psps_video.h`, `psps_input.h`, `psps_save.h`) |
-| `StdLib/` | Bundled zero-allocation PSPScript standard library modules imported by bare name (e.g., [collision.psps](StdLib/collision.psps)) |
+| `StdLib/` | Bundled zero-allocation PSPScript standard library modules imported by bare name ([input.psps](StdLib/input.psps), [collision.psps](StdLib/collision.psps)) |
 | `examples/` | Modular `.psps` projects: [Pong](examples/pong/main.psps), [Sprite Demo](examples/sprite/main.psps), and [Animation Demo](examples/anim/main.psps) |
 | `docs/` | [Language Tutorial](docs/tutorial.md) & [EBNF Grammar](docs/grammar.md) |
 | `vscode-pspscript/` | VS Code syntax highlighting extension & snippets |
@@ -126,9 +126,9 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 
 | Example | Entry Point | Showcased Features |
 | :--- | :--- | :--- |
-| **PSP Pong** | [examples/pong/main.psps](examples/pong/main.psps) | Multi-file `import`, `MainMenu` with message-driven `Button[4]` (`ButtonFocus` / `ButtonPress`), difficulty selector, `Ball[4]` pool, `PaddleBounce` messages, bitmap font HUD, `save_game` / `load_game` |
-| **Sprite Demo** | [examples/sprite/main.psps](examples/sprite/main.psps) | Compile-time baked PNGs (`Free_Chicken_House.png`, `Egg_item.png`), `sprite(...)`, tint cycling via `CycleTint` message, bobbing pooled `Egg[8]`, `temp var` normalized movement |
-| **Animation Demo** | [examples/anim/main.psps](examples/anim/main.psps) | Baked spritesheets (`Basic Charakter Spritesheet.png`, `Free Chicken Sprites.png`), 4-directional `draw_subsprite` animation with `timer` frame clocks, pooled `Chicken[6]` AI + `Startle` message, 2D camera tracking |
+| **PSP Pong** | [examples/pong/main.psps](examples/pong/main.psps) | Multi-file `import` + `import input`, built-in `rect.overlaps` / `rect.center`, range `for i in 0..12`, `MainMenu` with message-driven `Button[4]`, difficulty selector, `Ball[4]` pool, `PaddleBounce` messages, bitmap font HUD, `save_game` / `load_game` |
+| **Sprite Demo** | [examples/sprite/main.psps](examples/sprite/main.psps) | Compile-time baked PNGs (`Free_Chicken_House.png`, `Egg_item.png`), `import input` + `dpad_vector()`, `sprite(...)`, tint cycling via `CycleTint` message, bobbing pooled `Egg[8]`, `temp var` normalized movement |
+| **Animation Demo** | [examples/anim/main.psps](examples/anim/main.psps) | Baked spritesheets (`Basic Charakter Spritesheet.png`, `Free Chicken Sprites.png`), `import input` + `dpad_vector()`, 4-directional `draw_subsprite` animation with `timer` frame clocks, pooled `Chicken[6]` AI + `Startle` message, 2D camera tracking |
 
 ---
 
@@ -153,7 +153,11 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 * [x] VS Code Syntax Highlighting Extension & Snippets
 * [x] Language Tutorial & Modular Examples (`examples/pong`, `examples/sprite`, `examples/anim`)
 
-### Planned for v0.2+
+### v0.2 (In Progress)
+* [x] Bare `StdLib` Module Resolution (`import input`, `import collision`) & Project-Local Override Support
+* [x] Unified `for` Loops (`for cond { ... }` & `for i in start..end { ... }`, removing `while`)
+* [x] Built-In `rect` Geometry Helpers (`overlaps`, `contains`, read-only `center`)
+* [x] Initial Standard Library Modules (`StdLib/input.psps`, `StdLib/collision.psps`) & v0.2 Examples
 * [ ] Additional Standard Library Modules (`math`, `easing`, `tilemap`, `particles`)
 * [ ] Compile-Time Audio Asset Baker (WAV → PCM) & PSP Audio Runtime Module (`psps_audio.h`)
 * [ ] Language Server (LSP) for Real-Time VS Code Diagnostics & Autocomplete

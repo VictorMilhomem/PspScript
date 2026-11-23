@@ -40,10 +40,14 @@ public sealed partial class CCodeGenerator
                 EmitIfStmt(ifStmt, ctx);
                 break;
 
-            case WhileStmt whileStmt:
-                _writer.OpenBlock($"while ({EmitExpr(whileStmt.Condition, ctx)})");
-                EmitBlockStatements(whileStmt.Body, ctx);
+            case ForStmt forStmt:
+                _writer.OpenBlock($"while ({EmitExpr(forStmt.Condition, ctx)})");
+                EmitBlockStatements(forStmt.Body, ctx);
                 _writer.CloseBlock();
+                break;
+
+            case ForRangeStmt forRangeStmt:
+                EmitForRangeStmt(forRangeStmt, ctx);
                 break;
 
             case ForEachStmt forEachStmt:
@@ -176,6 +180,41 @@ public sealed partial class CCodeGenerator
         {
             _writer.OpenBlock("else");
             EmitBlockStatements(elseBlock, ctx);
+            _writer.CloseBlock();
+        }
+    }
+
+    private void EmitForRangeStmt(ForRangeStmt forRangeStmt, EmissionContext ctx)
+    {
+        string startExpr = EmitExpr(forRangeStmt.Start, ctx);
+        string endExpr = EmitExpr(forRangeStmt.End, ctx);
+
+        bool needsEndTemp = forRangeStmt.End is not (IntLiteralExpr or IdentifierExpr);
+        if (needsEndTemp)
+        {
+            int loopId = ++_loopCounter;
+            string endVar = $"_range_end_{loopId}";
+            _writer.OpenBlock();
+            _writer.WriteLine($"int32_t {endVar} = (int32_t)({endExpr});");
+            _writer.OpenBlock($"for (int32_t {forRangeStmt.IteratorName} = (int32_t)({startExpr}); {forRangeStmt.IteratorName} < {endVar}; ++{forRangeStmt.IteratorName})");
+            _writer.WriteLine($"(void){forRangeStmt.IteratorName};");
+
+            var loopCtx = ctx.Clone();
+            loopCtx.LocalVariables.Add(forRangeStmt.IteratorName);
+            EmitBlockStatements(forRangeStmt.Body, loopCtx);
+
+            _writer.CloseBlock();
+            _writer.CloseBlock();
+        }
+        else
+        {
+            _writer.OpenBlock($"for (int32_t {forRangeStmt.IteratorName} = (int32_t)({startExpr}); {forRangeStmt.IteratorName} < (int32_t)({endExpr}); ++{forRangeStmt.IteratorName})");
+            _writer.WriteLine($"(void){forRangeStmt.IteratorName};");
+
+            var loopCtx = ctx.Clone();
+            loopCtx.LocalVariables.Add(forRangeStmt.IteratorName);
+            EmitBlockStatements(forRangeStmt.Body, loopCtx);
+
             _writer.CloseBlock();
         }
     }

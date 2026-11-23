@@ -17,7 +17,7 @@ public static class PspParser
         "init", "update", "draw", "exit", "on",
         "int", "u8", "u16", "u32", "f32", "bool", "void",
         "vec2", "vec3", "rect", "color", "timer", "ref",
-        "if", "else", "while", "each", "in", "return",
+        "if", "else", "for", "each", "in", "return",
         "send", "spawn", "destroy", "goto",
         "true", "false", "null", "self"
     };
@@ -117,20 +117,37 @@ public static class PspParser
             });
 
         // Numbers: float (10.5), time (0.5s / 250ms), or int (42)
-        var numericExpr = Terms.Decimal(NumberOptions.Float)
+        // Fractional '.' is only consumed when followed by a digit so range literals like `0..10` stay intact.
+        var digits = Literals.Pattern(static c => char.IsAsciiDigit(c), minSize: 1);
+        var fracPartParser = Literals.Char('.').SkipAnd(digits)
+            .ThenElse<string?>(static (context, s) => s.ToString(), null);
+        var numericExpr = SkipWhiteSpace(digits)
+            .And(fracPartParser)
             .And(Literals.Text("ms").Or(Literals.Text("s")).Else(string.Empty))
             .Then<Expr>(static (context, x) =>
             {
-                decimal raw = x.Item1;
-                string suffix = x.Item2;
+                string intPart = x.Item1.ToString();
+                string? fracPart = x.Item2;
+                string suffix = x.Item3;
 
-                if (suffix == "ms") return new TimeLiteralExpr((float)(raw / 1000m));
-                if (suffix == "s")  return new TimeLiteralExpr((float)raw);
+                if (suffix == "ms")
+                {
+                    float val = float.Parse(fracPart is not null ? $"{intPart}.{fracPart}" : intPart, CultureInfo.InvariantCulture);
+                    return new TimeLiteralExpr(val / 1000.0f);
+                }
 
-                // Check if raw decimal was written without a decimal point (Scale == 0) or as float
-                return raw.Scale == 0
-                    ? new IntLiteralExpr((int)raw)
-                    : new FloatLiteralExpr((float)raw);
+                if (suffix == "s")
+                {
+                    float val = float.Parse(fracPart is not null ? $"{intPart}.{fracPart}" : intPart, CultureInfo.InvariantCulture);
+                    return new TimeLiteralExpr(val);
+                }
+
+                if (fracPart is not null)
+                {
+                    return new FloatLiteralExpr(float.Parse($"{intPart}.{fracPart}", CultureInfo.InvariantCulture));
+                }
+
+                return new IntLiteralExpr(int.Parse(intPart, CultureInfo.InvariantCulture));
             });
 
         var boolExpr = Keyword("true").Then<Expr>(static (context, _) => new BooleanLiteralExpr(true))
@@ -169,7 +186,8 @@ public static class PspParser
             )
             .Then<Func<Expr, Expr>>(static (context, args) => target => new CallExpr(target, args));
 
-        var fieldSuffix = Terms.Char('.')
+        var fieldSuffix = Not(Terms.Text(".."))
+            .SkipAnd(Terms.Char('.'))
             .SkipAnd(rawIdentifier.ElseError("Expected field or method name after '.'"))
             .Then<Func<Expr, Expr>>(static (context, field) => target => new FieldAccessExpr(target, field));
 
@@ -321,11 +339,21 @@ public static class PspParser
             )
             .Then(static (context, x) => new IfStmt(x.Item1, x.Item2, x.Item3));
 
-        // while cond { ... }
-        var whileStmt = Keyword("while")
+        // for i in start..end { ... }
+        var forRangeStmt = Keyword("for")
+            .SkipAnd(identifier)
+            .AndSkip(Keyword("in"))
+            .And(expr)
+            .AndSkip(Terms.Text("..").ElseError("Expected '..' in range 'for' loop"))
+            .And(expr)
+            .And(blockStmt)
+            .Then<Stmt>(static (context, x) => new ForRangeStmt(x.Item1, x.Item2, x.Item3, x.Item4));
+
+        // for cond { ... }
+        var forCondStmt = Keyword("for")
             .SkipAnd(expr)
             .And(blockStmt)
-            .Then<Stmt>(static (context, x) => new WhileStmt(x.Item1, x.Item2));
+            .Then<Stmt>(static (context, x) => new ForStmt(x.Item1, x.Item2));
 
         // each b in Bullet { ... }
         var forEachStmt = Keyword("each")
@@ -405,7 +433,8 @@ public static class PspParser
             spawnWithBinding,
             localVarStmt,
             ifStmt.Then<Stmt>(static (context, i) => i),
-            whileStmt,
+            forRangeStmt,
+            forCondStmt,
             forEachStmt,
             returnStmt,
             sendStmt,
