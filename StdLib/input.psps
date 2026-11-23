@@ -1,0 +1,23 @@
+// StdLib/input.psps
+
+global var BTN_CROSS: int = 1
+global var BTN_CIRCLE: int = 2
+global var BTN_SQUARE: int = 4
+global var BTN_TRIANGLE: int = 8
+global var BTN_UP: int = 16
+global var BTN_DOWN: int = 32
+global var BTN_LEFT: int = 64
+global var BTN_RIGHT: int = 128
+global var BTN_L: int = 256
+global var BTN_R: int = 512
+global var BTN_START: int = 1024
+global var BTN_SELECT: int = 2048
+
+fn dpad_vector() -> vec2 {
+    var dir: vec2 = { 0.0, 0.0 }
+    if button_held(BTN_LEFT)  { dir.x -= 1.0 }
+    if button_held(BTN_RIGHT) { dir.x += 1.0 }
+    if button_held(BTN_UP)    { dir.y -= 1.0 }
+    if button_held(BTN_DOWN)  { dir.y += 1.0 }
+    return dir
+}
