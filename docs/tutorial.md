@@ -36,6 +36,7 @@ PSPScript **v0.2** streamlines everyday PSP game code with unified `for` loops, 
 | **`rect` Geometry** | Manual AABB math (`check_aabb(...)`) | Built-in `r.overlaps(other)`, `r.contains(point)`, and read-only `r.center` |
 | **Enums & `match`** | Integer constants + `if`/`else if` chains | First-class nominal `enum` (`Season.Spring`) and exhaustive `match` statements |
 | **Baked Tilemaps** | Manual `[N]u8` arrays + `draw_tilemap(...)` | Compile-time Tiled (`.tmx`/`.tmj`) baking via `asset map = tilemap(...)` with multi-layer draw, collision queries, and opt-in `mutable: true` |
+| **Audio (`WAV` → PCM)** | Not available | Compile-time `.wav` baking via `sound(...)` / `music(...)` + zero-heap SDL2 8-SFX / 1-BGM mixer (`psps_audio.h`) |
 | **Imported Assets** | Resolved relative to entry directory only | Resolves relative to the declaring file first, then falls back to entry directory |
 
 ### Quick Migration Examples
@@ -707,6 +708,36 @@ state Overworld {
 | `.set_tile(layer, col, row, id)` | `void` | Mutates tile cell at runtime (requires `mutable: true`) |
 | `.set_solid(col, row, solid)` | `void` | Mutates collision cell at runtime (requires `mutable: true`) |
 | `.reset()` | `void` | Restores writable `.bss` map from `.rodata` template (requires `mutable: true`; also runs automatically on `goto`) |
+
+### Compile-Time Baked WAV Audio (`sound` & `music`)
+
+PSPScript bakes uncompressed 8-bit/16-bit PCM `.wav` files directly into static `.rodata` `int16_t` arrays at compile time, mixed by a zero-heap 44.1 kHz SDL2 software mixer (`Runtime/psps_audio.h`, 8 concurrent SFX voices + 1 dedicated looping BGM channel):
+
+```pspscript
+asset bounce_sfx = sound("sfx/bounce.wav")             // Auto-normalized to mono 44.1 kHz
+asset theme_bgm  = music("bgm/theme.wav", rate: 22050) // Preserves mono/stereo; 22.05 kHz halves RAM
+
+state Match {
+    init() {
+        set_master_volume(0.85)
+        theme_bgm.play(0.6)      // Loops seamlessly across 'goto' state transitions
+    }
+
+    update(dt: f32) {
+        if button_pressed(BTN_CROSS) {
+            bounce_sfx.play(0.9) // Or shorthand: play_sound(bounce_sfx, 0.9)
+        }
+    }
+}
+```
+
+| API | Description |
+| :--- | :--- |
+| `sfx.play([volume])` / `play_sound(sfx[, volume])` | Plays a `sound` asset (default volume `1.0`); steals oldest voice if all 8 SFX slots are busy |
+| `bgm.play([volume])` | Starts looping a `music` asset on the dedicated BGM channel |
+| `bgm.stop()` / `bgm.pause()` / `bgm.resume()` | Stops, pauses, or resumes the active BGM track |
+| `set_master_volume(vol: f32)` | Sets global mixer volume (`0.0..1.0`) |
+| `stop_all_sounds()` | Immediately silences all 8 SFX voices |
 
 ### Spritesheet Animation (`draw_subsprite` + `timer`)
 

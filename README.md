@@ -113,7 +113,7 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 | `Parser/` | Parlot-based recursive-descent & precedence-climbing parser (`PspParser.cs`) + multi-file `ModuleLoader.cs` |
 | `Semantics/` | Two-pass semantic analyzer, symbol table, type checker, entry state & static RAM budget validator |
 | `CodeGen/` | Modular C99 code generator (`CSourceWriter`, `CTypeMapper`, `AssetBaker`, `Actors`, `States`, `Statements`, `Expressions`) |
-| `Runtime/` | Zero-heap STB-style C99 headers (`psps_runtime.h`, `psps_types.h`, `psps_arena.h`, `psps_video.h`, `psps_input.h`, `psps_save.h`) |
+| `Runtime/` | Zero-heap STB-style C99 headers (`psps_runtime.h`, `psps_types.h`, `psps_arena.h`, `psps_video.h`, `psps_input.h`, `psps_save.h`, `psps_audio.h`) |
 | `StdLib/` | Bundled zero-allocation PSPScript standard library modules imported by bare name ([input.psps](StdLib/input.psps), [collision.psps](StdLib/collision.psps)) |
 | `examples/` | Modular `.psps` projects: [Pong](examples/pong/main.psps), [Sprite Demo](examples/sprite/main.psps), and [Animation Demo](examples/anim/main.psps) |
 | `docs/` | [Language Tutorial](docs/tutorial.md) & [EBNF Grammar](docs/grammar.md) |
@@ -158,8 +158,10 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 * [x] Unified `for` Loops (`for cond { ... }` & `for i in start..end { ... }`, removing `while`)
 * [x] Built-In `rect` Geometry Helpers (`overlaps`, `contains`, read-only `center`)
 * [x] Initial Standard Library Modules (`StdLib/input.psps`, `StdLib/collision.psps`) & v0.2 Examples
+* [x] First-Class `enum` Declarations & Exhaustive `match` Statements
+* [x] Compile-Time Baked Tiled Tilemaps (`DotTiled` `.tmx`/`.tmj`, multi-layer, collision & opt-in `mutable: true`)
+* [x] Compile-Time Audio Asset Baker (WAV → PCM) & PSP Audio Runtime Module (`psps_audio.h`)
 * [ ] Additional Standard Library Modules (`math`, `easing`, `tilemap`, `particles`)
-* [ ] Compile-Time Audio Asset Baker (WAV → PCM) & PSP Audio Runtime Module (`psps_audio.h`)
 * [ ] Language Server (LSP) for Real-Time VS Code Diagnostics & Autocomplete
 * [ ] Automated Unit & Integration Test Suite
 

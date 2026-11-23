@@ -302,7 +302,12 @@ public sealed class SymbolTable
         RegisterBuiltin("load_game", ResolvedType.Bool, isVariadic: false);
 
         RegisterBuiltin("play_sound", ResolvedType.Void, isVariadic: true,
-            new ParamSymbol("sound", ResolvedType.Any));
+            new ParamSymbol("sound", new AssetType("sound")));
+
+        RegisterBuiltin("set_master_volume", ResolvedType.Void, isVariadic: false,
+            new ParamSymbol("volume", ResolvedType.F32));
+
+        RegisterBuiltin("stop_all_sounds", ResolvedType.Void, isVariadic: false);
 
         RegisterBuiltin("button_pressed", ResolvedType.Bool, isVariadic: false,
             new ParamSymbol("button", ResolvedType.Int));

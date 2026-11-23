@@ -50,6 +50,7 @@ state Match {
             // Check left goal (CPU scored)
             if b.pos.x + b.size < 0.0 {
                 cpu_score += 1
+                sfx_score.play(0.9)
                 b.pos = { 236.0, 132.0 }
                 b.vel = { 180.0, 90.0 }
                 b.serve_delay = 750ms
@@ -58,6 +59,7 @@ state Match {
             // Check right goal (Player scored)
             if b.pos.x > 480.0 {
                 player_score += 1
+                sfx_score.play(0.9)
                 b.pos = { 236.0, 132.0 }
                 b.vel = { -180.0, -90.0 }
                 b.serve_delay = 750ms

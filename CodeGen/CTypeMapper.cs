@@ -22,6 +22,8 @@ internal static class CTypeMapper
         PrimitiveType { Kind: PrimitiveKind.Color } => "psps_color_t",
         PrimitiveType { Kind: PrimitiveKind.Timer } => "psps_timer_t",
         ActorRefType => "psps_ref_t",
+        AssetType { AssetKind: "sound" or "music" } => "psps_sound_t",
+        AssetType { AssetKind: "tilemap" } => "psps_baked_tilemap_t",
         AssetType => "psps_texture_t",
         StructType st => $"{st.Name}_t",
         EnumType en => $"{en.Name}_t",

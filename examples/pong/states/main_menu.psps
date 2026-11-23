@@ -37,12 +37,14 @@ state MainMenu {
         }
 
         if focus_changed {
+            sfx_chip.play(0.7)
             each btn in Button {
                 send(btn, ButtonFocus { focused_id: selected_index })
             }
         }
 
         if button_pressed(BTN_CROSS) || button_pressed(BTN_START) {
+            sfx_click.play(0.8)
             each btn in Button {
                 send(btn, ButtonPress { confirmed: true })
             }

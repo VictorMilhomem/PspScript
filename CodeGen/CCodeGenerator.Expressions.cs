@@ -255,6 +255,33 @@ public sealed partial class CCodeGenerator
                 };
             }
 
+            if (receiverType is AssetType { AssetKind: "sound" })
+            {
+                return method switch
+                {
+                    "play" when callExpr.Arguments.Count == 0 =>
+                        $"psps_audio_play_sound(&({receiverExpr}), 1.0f)",
+                    "play" when callExpr.Arguments.Count == 1 =>
+                        $"psps_audio_play_sound(&({receiverExpr}), (float)({EmitExpr(callExpr.Arguments[0], ctx)}))",
+                    _ => "(void)0"
+                };
+            }
+
+            if (receiverType is AssetType { AssetKind: "music" })
+            {
+                return method switch
+                {
+                    "play" when callExpr.Arguments.Count == 0 =>
+                        $"psps_audio_play_music(&({receiverExpr}), 1.0f)",
+                    "play" when callExpr.Arguments.Count == 1 =>
+                        $"psps_audio_play_music(&({receiverExpr}), (float)({EmitExpr(callExpr.Arguments[0], ctx)}))",
+                    "stop" => "psps_audio_stop_music()",
+                    "pause" => "psps_audio_pause_music()",
+                    "resume" => "psps_audio_resume_music()",
+                    _ => "(void)0"
+                };
+            }
+
             if (receiverType is AssetType { AssetKind: "tilemap" })
             {
                 return method switch
@@ -388,6 +415,15 @@ public sealed partial class CCodeGenerator
                 "psps_save_write(PSPS_SAVE_GAME_ID, PSPS_SAVE_TITLE, &g_globals, sizeof(g_globals))",
             "load_game" =>
                 "psps_save_read(PSPS_SAVE_GAME_ID, &g_globals, sizeof(g_globals))",
+
+            "play_sound" when emitted.Count == 1 =>
+                $"psps_audio_play_sound(&({emitted[0]}), 1.0f)",
+            "play_sound" when emitted.Count >= 2 =>
+                $"psps_audio_play_sound(&({emitted[0]}), (float)({emitted[1]}))",
+            "set_master_volume" when emitted.Count >= 1 =>
+                $"psps_audio_set_master_volume((float)({emitted[0]}))",
+            "stop_all_sounds" =>
+                "psps_audio_stop_all_sounds()",
 
             "button_pressed" when emitted.Count >= 1 =>
                 $"psps_input_pressed((uint32_t)({emitted[0]}))",

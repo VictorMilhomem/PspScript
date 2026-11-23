@@ -1,5 +1,11 @@
-// Shared messages, standard input constants, and game state variables
+// Shared messages, standard input constants, baked SFX, and game state variables
 import input
+
+// Compile-time baked WAV sound effects (normalized to mono 44.1 kHz PCM)
+asset sfx_chip  = sound("../assets/SFX/Chip.wav")
+asset sfx_click = sound("../assets/SFX/Click.wav")
+asset sfx_hit   = sound("../assets/SFX/Hit.wav")
+asset sfx_score = sound("../assets/SFX/Score.wav")
 
 message PaddleBounce {
     dir_x: f32,

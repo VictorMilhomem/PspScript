@@ -5,9 +5,14 @@ state GameOver {
 
     update(dt: f32) {
         if button_pressed(BTN_CROSS) {
+            sfx_click.play(0.8)
             goto Match
         }
-        if button_pressed(BTN_CIRCLE) || rematch_timer.elapsed() {
+        if button_pressed(BTN_CIRCLE) {
+            sfx_click.play(0.8)
+            goto MainMenu
+        }
+        if rematch_timer.elapsed() {
             goto MainMenu
         }
     }

@@ -25,6 +25,9 @@
     #ifndef PSPS_SAVE_IMPLEMENTATION
         #define PSPS_SAVE_IMPLEMENTATION
     #endif
+    #ifndef PSPS_AUDIO_IMPLEMENTATION
+        #define PSPS_AUDIO_IMPLEMENTATION
+    #endif
 #endif
 
 #include "psps_utils.h"
@@ -33,5 +36,6 @@
 #include "psps_video.h"
 #include "psps_input.h"
 #include "psps_save.h"
+#include "psps_audio.h"
 
 #endif /* PSPS_RUNTIME_H */

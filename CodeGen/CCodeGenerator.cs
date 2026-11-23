@@ -179,8 +179,11 @@ public sealed partial class CCodeGenerator
             _writer.WriteLine();
         }
 
-        // Pass 1: Bake explicit texture/other assets
-        foreach (var asset in _symbols.Assets.Values.Where(static a => !string.Equals(a.AssetKind, "tilemap", StringComparison.Ordinal)))
+        // Pass 1: Bake explicit texture assets
+        foreach (var asset in _symbols.Assets.Values.Where(static a =>
+                     !string.Equals(a.AssetKind, "tilemap", StringComparison.Ordinal) &&
+                     !string.Equals(a.AssetKind, "sound", StringComparison.Ordinal) &&
+                     !string.Equals(a.AssetKind, "music", StringComparison.Ordinal)))
         {
             var baked = AssetBaker.BakeTexture(asset, _sourceBaseDir, out string? resolvedPath);
             _bakedAssets[asset.Name] = baked;
@@ -192,6 +195,25 @@ public sealed partial class CCodeGenerator
             }
 
             EmitBakedTextureCArray(cVarName, baked, $"Baked Asset '{asset.Name}' ({asset.AssetKind}: \"{asset.FilePath}\", {baked.Width}x{baked.Height}, {baked.Format})");
+        }
+
+        // Pass 1b: Bake compile-time WAV audio assets (sound & music)
+        foreach (var asset in _symbols.Assets.Values.Where(static a =>
+                     string.Equals(a.AssetKind, "sound", StringComparison.Ordinal) ||
+                     string.Equals(a.AssetKind, "music", StringComparison.Ordinal)))
+        {
+            var bakedAudio = AudioBaker.BakeAudio(asset, _sourceBaseDir);
+            int rateHz = bakedAudio.HalfRate ? 22050 : 44100;
+            _writer.WriteLine($"/* Baked Audio '{asset.Name}' ({asset.AssetKind}: \"{asset.FilePath}\", {bakedAudio.FrameCount} frames, {bakedAudio.Channels}ch, {rateHz}Hz) */");
+            EmitInt16Array($"g_asset_{asset.Name}_pcm", bakedAudio.Samples);
+
+            _writer.OpenBlock($"static const psps_sound_t g_asset_{asset.Name} =");
+            _writer.WriteLine($".samples = g_asset_{asset.Name}_pcm,");
+            _writer.WriteLine($".frame_count = {bakedAudio.FrameCount}u,");
+            _writer.WriteLine($".channels = {bakedAudio.Channels}u,");
+            _writer.WriteLine($".half_rate = {(bakedAudio.HalfRate ? "1u" : "0u")}");
+            _writer.CloseBlock(";");
+            _writer.WriteLine();
         }
 
         // Pass 2: Bake compile-time Tiled (.tmx/.tmj) tilemap assets
@@ -383,6 +405,24 @@ public sealed partial class CCodeGenerator
             for (int j = 0; j < count; j++)
             {
                 row[j] = $"{values[i + j]}u";
+            }
+            string suffix = (i + count < values.Length) ? "," : string.Empty;
+            _writer.WriteLine(string.Join(", ", row) + suffix);
+        }
+        _writer.CloseBlock(";");
+    }
+
+    private void EmitInt16Array(string name, short[] values)
+    {
+        _writer.OpenBlock($"static const int16_t {name}[{values.Length}] =");
+        const int perLine = 16;
+        for (int i = 0; i < values.Length; i += perLine)
+        {
+            int count = Math.Min(perLine, values.Length - i);
+            var row = new string[count];
+            for (int j = 0; j < count; j++)
+            {
+                row[j] = values[i + j].ToString(System.Globalization.CultureInfo.InvariantCulture);
             }
             string suffix = (i + count < values.Length) ? "," : string.Empty;
             _writer.WriteLine(string.Join(", ", row) + suffix);

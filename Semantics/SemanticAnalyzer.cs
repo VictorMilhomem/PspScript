@@ -646,6 +646,25 @@ public sealed class SemanticAnalyzer
     {
         foreach (var opt in asset.Options)
         {
+            if (asset.AssetKind is "sound" or "music" &&
+                string.Equals(opt.Name, "rate", StringComparison.OrdinalIgnoreCase))
+            {
+                if (opt.Value is IntLiteralExpr { Value: 44100 or 22050 })
+                {
+                    _model.RecordType(opt.Value, ResolvedType.Int);
+                    _model.RecordType(opt, ResolvedType.Int);
+                }
+                else
+                {
+                    ReportError(
+                        $"Audio asset '{asset.Name}' option 'rate' must be 44100 or 22050.",
+                        opt.Span
+                    );
+                    _model.RecordType(opt, ResolvedType.Error);
+                }
+                continue;
+            }
+
             if (string.Equals(asset.AssetKind, "tilemap", StringComparison.Ordinal))
             {
                 if (string.Equals(opt.Name, "tileset", StringComparison.OrdinalIgnoreCase))
@@ -2226,6 +2245,39 @@ public sealed class SemanticAnalyzer
                     }
                     _model.RecordType(memberAccess, new FunctionType([ResolvedType.Vec2], ResolvedType.Bool));
                     return ResolvedType.Bool;
+            }
+        }
+
+        // Built-in methods on 'sound' (SFX) and 'music' (BGM) assets
+        if (receiverType is AssetType { AssetKind: "sound" or "music" } audioAsset)
+        {
+            switch (methodName)
+            {
+                case "play":
+                    if (callExpr.Arguments.Count > 1)
+                    {
+                        ReportError($"Method '{audioAsset.AssetKind}.play([volume])' takes 0 or 1 argument, got {callExpr.Arguments.Count}.", callExpr.Span);
+                        foreach (var arg in callExpr.Arguments)
+                            ResolveExpr(arg, scope, expectedType: null);
+                    }
+                    else if (callExpr.Arguments.Count == 1)
+                    {
+                        var volType = ResolveExpr(callExpr.Arguments[0], scope, expectedType: ResolvedType.F32);
+                        if (!ResolvedType.IsAssignableTo(volType, ResolvedType.F32))
+                            ReportError($"Argument 'volume' to '{audioAsset.AssetKind}.play' must be 'f32', got '{volType}'.", callExpr.Arguments[0].Span);
+                    }
+                    _model.RecordType(memberAccess, new FunctionType([], ResolvedType.Void));
+                    return ResolvedType.Void;
+
+                case "stop" or "pause" or "resume" when audioAsset.AssetKind == "music":
+                    if (callExpr.Arguments.Count != 0)
+                    {
+                        ReportError($"Method 'music.{methodName}()' takes 0 arguments, got {callExpr.Arguments.Count}.", callExpr.Span);
+                        foreach (var arg in callExpr.Arguments)
+                            ResolveExpr(arg, scope, expectedType: null);
+                    }
+                    _model.RecordType(memberAccess, new FunctionType([], ResolvedType.Void));
+                    return ResolvedType.Void;
             }
         }
 

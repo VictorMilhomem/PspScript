@@ -242,6 +242,7 @@ public sealed partial class CCodeGenerator
         _writer.WriteLine("return 1;");
         _writer.CloseBlock();
         _writer.WriteLine("psps_input_init();");
+        _writer.WriteLine("psps_audio_init();");
         _writer.WriteLine();
 
         if (_texturesToUpload.Count > 0)
@@ -361,13 +362,14 @@ public sealed partial class CCodeGenerator
         _writer.CloseBlock();
         _writer.WriteLine();
 
-        if (_symbols.Assets.Count > 0)
+        if (_texturesToUpload.Count > 0)
         {
-            foreach (var asset in _symbols.Assets.Values)
+            foreach (var (cVarName, _) in _texturesToUpload)
             {
-                _writer.WriteLine($"psps_destroy_texture(&g_asset_{asset.Name});");
+                _writer.WriteLine($"psps_destroy_texture(&{cVarName});");
             }
         }
+        _writer.WriteLine("psps_audio_shutdown();");
         _writer.WriteLine("psps_input_shutdown();");
         _writer.WriteLine("psps_video_shutdown();");
         _writer.WriteLine("return 0;");
