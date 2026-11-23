@@ -168,6 +168,11 @@ public sealed partial class CCodeGenerator
             AssignOp.SubAssign => "-=",
             AssignOp.MulAssign => "*=",
             AssignOp.DivAssign => "/=",
+            AssignOp.BitAndAssign => "&=",
+            AssignOp.BitOrAssign => "|=",
+            AssignOp.BitXorAssign => "^=",
+            AssignOp.ShiftLeftAssign => "<<=",
+            AssignOp.ShiftRightAssign => ">>=",
             _ => "="
         };
 

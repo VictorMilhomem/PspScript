@@ -90,6 +90,11 @@ public sealed partial class CCodeGenerator
             return $"(-({operand}))";
         }
 
+        if (unaryExpr.Operator == UnaryOp.BitNot)
+        {
+            return $"(~({operand}))";
+        }
+
         return $"(!({operand}))";
     }
 
@@ -144,6 +149,11 @@ public sealed partial class CCodeGenerator
             BinaryOp.Mul => "*",
             BinaryOp.Div => "/",
             BinaryOp.Mod => "%",
+            BinaryOp.ShiftLeft => "<<",
+            BinaryOp.ShiftRight => ">>",
+            BinaryOp.BitAnd => "&",
+            BinaryOp.BitXor => "^",
+            BinaryOp.BitOr => "|",
             BinaryOp.Equal => "==",
             BinaryOp.NotEqual => "!=",
             BinaryOp.Less => "<",

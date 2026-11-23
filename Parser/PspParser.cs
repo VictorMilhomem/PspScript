@@ -210,15 +210,16 @@ public static class PspParser
                 return current;
             });
 
-        // Unary operators: `-x`, `!flag`
+        // Unary operators: `-x`, `!flag`, `~mask`
         var unaryExpr = Deferred<Expr>();
         unaryExpr.Parser = OneOf(
             Terms.Char('-').SkipAnd(unaryExpr).Then<Expr>(static (context, operand) => new UnaryExpr(UnaryOp.Negate, operand)),
             Terms.Char('!').SkipAnd(unaryExpr).Then<Expr>(static (context, operand) => new UnaryExpr(UnaryOp.Not, operand)),
+            Terms.Char('~').SkipAnd(unaryExpr).Then<Expr>(static (context, operand) => new UnaryExpr(UnaryOp.BitNot, operand)),
             postfixExpr
         );
 
-        // Precedence climbing (highest to lowest)
+        // Precedence climbing (highest to lowest, matching C99)
         var factorExpr = unaryExpr.LeftAssociative(
             (Terms.Text("*"), static (context, a, b) => new BinaryExpr(a, BinaryOp.Mul, b)),
             (Terms.Text("/"), static (context, a, b) => new BinaryExpr(a, BinaryOp.Div, b)),
@@ -230,7 +231,12 @@ public static class PspParser
             (Terms.Text("-"), static (context, a, b) => new BinaryExpr(a, BinaryOp.Sub, b))
         );
 
-        var comparisonExpr = termExpr.LeftAssociative(
+        var shiftExpr = termExpr.LeftAssociative(
+            (Terms.Text("<<"), static (context, a, b) => new BinaryExpr(a, BinaryOp.ShiftLeft, b)),
+            (Terms.Text(">>"), static (context, a, b) => new BinaryExpr(a, BinaryOp.ShiftRight, b))
+        );
+
+        var comparisonExpr = shiftExpr.LeftAssociative(
             (Terms.Text("<="), static (context, a, b) => new BinaryExpr(a, BinaryOp.LessEqual, b)),
             (Terms.Text(">="), static (context, a, b) => new BinaryExpr(a, BinaryOp.GreaterEqual, b)),
             (Terms.Text("<"),  static (context, a, b) => new BinaryExpr(a, BinaryOp.Less, b)),
@@ -242,7 +248,19 @@ public static class PspParser
             (Terms.Text("!="), static (context, a, b) => new BinaryExpr(a, BinaryOp.NotEqual, b))
         );
 
-        var logicAndExpr = equalityExpr.LeftAssociative(
+        var bitAndExpr = equalityExpr.LeftAssociative(
+            (Not(Terms.Text("&&")).SkipAnd(Terms.Text("&")), static (context, a, b) => new BinaryExpr(a, BinaryOp.BitAnd, b))
+        );
+
+        var bitXorExpr = bitAndExpr.LeftAssociative(
+            (Terms.Text("^"), static (context, a, b) => new BinaryExpr(a, BinaryOp.BitXor, b))
+        );
+
+        var bitOrExpr = bitXorExpr.LeftAssociative(
+            (Not(Terms.Text("||")).SkipAnd(Terms.Text("|")), static (context, a, b) => new BinaryExpr(a, BinaryOp.BitOr, b))
+        );
+
+        var logicAndExpr = bitOrExpr.LeftAssociative(
             (Terms.Text("&&"), static (context, a, b) => new BinaryExpr(a, BinaryOp.LogicalAnd, b))
         );
 
@@ -450,10 +468,15 @@ public static class PspParser
 
         // Assignment (`target += val`) or standalone expression (`sprite(...)`)
         var assignOp = OneOf(
+            Terms.Text("<<=").Then(static (context, _) => AssignOp.ShiftLeftAssign),
+            Terms.Text(">>=").Then(static (context, _) => AssignOp.ShiftRightAssign),
             Terms.Text("+=").Then(static (context, _) => AssignOp.AddAssign),
             Terms.Text("-=").Then(static (context, _) => AssignOp.SubAssign),
             Terms.Text("*=").Then(static (context, _) => AssignOp.MulAssign),
             Terms.Text("/=").Then(static (context, _) => AssignOp.DivAssign),
+            Terms.Text("&=").Then(static (context, _) => AssignOp.BitAndAssign),
+            Terms.Text("|=").Then(static (context, _) => AssignOp.BitOrAssign),
+            Terms.Text("^=").Then(static (context, _) => AssignOp.BitXorAssign),
             Terms.Text("=").Then(static (context, _) => AssignOp.Assign)
         );
 

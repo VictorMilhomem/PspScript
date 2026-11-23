@@ -170,7 +170,12 @@ public enum AssignOp
     AddAssign, // +=
     SubAssign, // -=
     MulAssign, // *=
-    DivAssign // /=
+    DivAssign, // /=
+    BitAndAssign, // &=
+    BitOrAssign, // |=
+    BitXorAssign, // ^=
+    ShiftLeftAssign, // <<=
+    ShiftRightAssign // >>=
 }
 
 public record IfStmt(
@@ -279,7 +284,8 @@ public record UnaryExpr(UnaryOp Operator, Expr Operand): Expr;
 public enum UnaryOp
 {
     Negate, // -
-    Not // !
+    Not, // !
+    BitNot // ~
 }
 
 public record BinaryExpr(Expr Left, BinaryOp Op, Expr Right): Expr;
@@ -287,6 +293,8 @@ public record BinaryExpr(Expr Left, BinaryOp Op, Expr Right): Expr;
 public enum BinaryOp
 {
     Add, Sub, Mul, Div, Mod,
+    ShiftLeft, ShiftRight,
+    BitAnd, BitXor, BitOr,
     Equal, NotEqual,
     Less, LessEqual, Greater, GreaterEqual,
     LogicalAnd, LogicalOr

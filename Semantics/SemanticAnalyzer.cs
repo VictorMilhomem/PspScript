@@ -1133,6 +1133,17 @@ public sealed class SemanticAnalyzer
                 );
             }
         }
+        else if (assign.Operator is AssignOp.BitAndAssign or AssignOp.BitOrAssign or AssignOp.BitXorAssign
+                                 or AssignOp.ShiftLeftAssign or AssignOp.ShiftRightAssign)
+        {
+            if (!targetType.IsInteger || !valueType.IsInteger)
+            {
+                ReportError(
+                    $"Operator '{FormatAssignOp(assign.Operator)}' requires integer operands, got '{targetType}' and '{valueType}'.",
+                    assign.Span
+                );
+            }
+        }
         else
         {
             var binaryEquiv = assign.Operator switch
@@ -1829,6 +1840,13 @@ public sealed class SemanticAnalyzer
                 ReportError($"Logical '!' operator requires a 'bool' operand, got '{operandType}'.", unaryExpr.Span);
                 return ResolvedType.Error;
 
+            case UnaryOp.BitNot:
+                if (operandType.IsInteger)
+                    return operandType == ResolvedType.U32 ? ResolvedType.U32 : ResolvedType.Int;
+
+                ReportError($"Bitwise '~' operator requires an integer operand, got '{operandType}'.", unaryExpr.Span);
+                return ResolvedType.Error;
+
             default:
                 return ResolvedType.Error;
         }
@@ -1856,6 +1874,26 @@ public sealed class SemanticAnalyzer
 
                 ReportError(
                     $"Operator '{FormatBinaryOp(binaryExpr.Op)}' cannot be applied to operands of type '{leftType}' and '{rightType}'.",
+                    binaryExpr.Span
+                );
+                return ResolvedType.Error;
+            }
+
+            case BinaryOp.BitAnd:
+            case BinaryOp.BitOr:
+            case BinaryOp.BitXor:
+            case BinaryOp.ShiftLeft:
+            case BinaryOp.ShiftRight:
+            {
+                if (leftType.IsInteger && rightType.IsInteger)
+                {
+                    bool unsigned32 = leftType == ResolvedType.U32 ||
+                        (binaryExpr.Op is BinaryOp.BitAnd or BinaryOp.BitOr or BinaryOp.BitXor && rightType == ResolvedType.U32);
+                    return unsigned32 ? ResolvedType.U32 : ResolvedType.Int;
+                }
+
+                ReportError(
+                    $"Bitwise operator '{FormatBinaryOp(binaryExpr.Op)}' requires integer operands, got '{leftType}' and '{rightType}'.",
                     binaryExpr.Span
                 );
                 return ResolvedType.Error;
@@ -2539,6 +2577,11 @@ public sealed class SemanticAnalyzer
         BinaryOp.Mul => "*",
         BinaryOp.Div => "/",
         BinaryOp.Mod => "%",
+        BinaryOp.ShiftLeft => "<<",
+        BinaryOp.ShiftRight => ">>",
+        BinaryOp.BitAnd => "&",
+        BinaryOp.BitXor => "^",
+        BinaryOp.BitOr => "|",
         BinaryOp.Equal => "==",
         BinaryOp.NotEqual => "!=",
         BinaryOp.Less => "<",
@@ -2557,6 +2600,11 @@ public sealed class SemanticAnalyzer
         AssignOp.SubAssign => "-=",
         AssignOp.MulAssign => "*=",
         AssignOp.DivAssign => "/=",
+        AssignOp.BitAndAssign => "&=",
+        AssignOp.BitOrAssign => "|=",
+        AssignOp.BitXorAssign => "^=",
+        AssignOp.ShiftLeftAssign => "<<=",
+        AssignOp.ShiftRightAssign => ">>=",
         _ => op.ToString()
     };
 }

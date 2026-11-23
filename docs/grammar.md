@@ -108,17 +108,21 @@ ForStmt        ::= "for" Expr Block
 ForRangeStmt   ::= "for" IDENT "in" Expr ".." Expr Block
 BreakStmt      ::= "break"
 ReturnStmt     ::= "return" Expr?
-AssignStmt     ::= Expr ("=" | "+=" | "-=" | "*=" | "/=") Expr
+AssignStmt     ::= Expr ("=" | "+=" | "-=" | "*=" | "/=" | "&=" | "|=" | "^=" | "<<=" | ">>=") Expr
 ExprStmt       ::= Expr
 
 Expr           ::= LogicOr
 LogicOr        ::= LogicAnd ("||" LogicAnd)*
-LogicAnd       ::= Equality ("&&" Equality)*
+LogicAnd       ::= BitOr ("&&" BitOr)*
+BitOr          ::= BitXor ("|" BitXor)*
+BitXor         ::= BitAnd ("^" BitAnd)*
+BitAnd         ::= Equality ("&" Equality)*
 Equality       ::= Comparison (("==" | "!=") Comparison)*
-Comparison     ::= Term (("<" | "<=" | ">" | ">=") Term)*
+Comparison     ::= Shift (("<" | "<=" | ">" | ">=") Shift)*
+Shift          ::= Term (("<<" | ">>") Term)*
 Term           ::= Factor (("+" | "-") Factor)*
 Factor         ::= Unary (("*" | "/" | "%") Unary)*
-Unary          ::= ("!" | "-") Unary | Postfix
+Unary          ::= ("!" | "-" | "~") Unary | Postfix
 
 Postfix        ::= Primary ( CallSuffix | FieldSuffix | IndexSuffix )*
 CallSuffix     ::= "(" ArgList? ")"

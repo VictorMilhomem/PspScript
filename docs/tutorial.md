@@ -499,6 +499,7 @@ fn wait_until_edge(x: f32) -> f32 {
 - `each item in PoolName { ... }` — safe active-slot iteration over actor pools
 - `break` — exits the innermost `for` or `each` loop immediately
 - `return` or `return expr` (non-void functions must return a value on all code paths)
+- **Bitwise operators (integers only):** `&`, `|`, `^`, `<<`, `>>`, unary `~`, and compound assignments `&=`, `|=`, `^=`, `<<=`, `>>=` (follows standard C99 precedence; useful for combining PSP button bitmasks like `BTN_CROSS | BTN_START` or flag fields).
 - Functions without `-> Type` default to `void`.
 
 ```pspscript
