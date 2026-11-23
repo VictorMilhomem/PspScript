@@ -2,7 +2,7 @@
   "name": "pspscript",
   "displayName": "PSPScript",
   "description": "Syntax highlighting, language configuration, and snippets for PSPScript (.psps) — PlayStation Portable homebrew scripting language.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "pspscript",
   "icon": "images/icon.png",
   "engines": {

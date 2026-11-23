@@ -10,11 +10,84 @@
     "prefix": "game",
     "body": [
       "game \"${1:My PSP Game}\" {",
-      "\tram_budget: ${2:16MB},",
-      "\tfps: ${3:60}",
+      "\tid: \"${2:PSPS00001}\",",
+      "\tversion: \"${3:01.00}\",",
+      "\tram_budget: ${4:16MB},",
+      "\tfps: ${5:60},",
+      "\tentry: ${6:Gameplay}",
       "}"
     ],
-    "description": "Declare a PSPScript game configuration block"
+    "description": "Declare a PSPScript v0.2 game configuration block"
+  },
+  "Enum Declaration": {
+    "prefix": "enum",
+    "body": [
+      "enum ${1:Season} {",
+      "\t${2:Spring},",
+      "\t${3:Summer},",
+      "\t${4:Fall},",
+      "\t${5:Winter}",
+      "}"
+    ],
+    "description": "Declare a nominal PSPScript enum"
+  },
+  "Struct Declaration": {
+    "prefix": "struct",
+    "body": [
+      "struct ${1:Stats} {",
+      "\t${2:score}: ${3:int} = ${4:0}",
+      "}"
+    ],
+    "description": "Declare a passive value struct"
+  },
+  "Match Statement": {
+    "prefix": "match",
+    "body": [
+      "match ${1:value} {",
+      "\t${2:Enum.Variant} => ${3:},",
+      "\t_ => $0",
+      "}"
+    ],
+    "description": "Exhaustive match statement over an enum or integer"
+  },
+  "Range For Loop": {
+    "prefix": "for",
+    "body": [
+      "for ${1:i} in ${2:0}..${3:10} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Exclusive integer range for loop"
+  },
+  "Conditional For Loop": {
+    "prefix": "forcond",
+    "body": [
+      "for ${1:condition} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Go-style conditional for loop"
+  },
+  "Tilemap Asset": {
+    "prefix": "tilemap",
+    "body": [
+      "asset ${1:level1} = tilemap(\"${2:maps/level1.tmx}\", tileset: ${3:world_sheet})"
+    ],
+    "description": "Declare a compile-time baked Tiled (.tmx/.tmj) tilemap asset"
+  },
+  "Sound Asset": {
+    "prefix": "sound",
+    "body": [
+      "asset ${1:sfx_hit} = sound(\"${2:assets/hit.wav}\")"
+    ],
+    "description": "Declare a compile-time baked WAV sound effect asset"
+  },
+  "Music Asset": {
+    "prefix": "music",
+    "body": [
+      "asset ${1:theme_bgm} = music(\"${2:assets/theme.wav}\", rate: ${3:22050})"
+    ],
+    "description": "Declare a compile-time baked looping WAV background music asset"
   },
   "Singleton Actor": {
     "prefix": "actor",

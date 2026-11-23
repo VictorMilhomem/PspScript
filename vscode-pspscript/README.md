@@ -8,7 +8,7 @@ Symlink the extension folder directly into your local VS Code extensions directo
 
 ```bash
 mkdir -p ~/.vscode/extensions
-ln -sfn "$(pwd)/vscode-pspscript" ~/.vscode/extensions/pspscript-0.1.0
+ln -sfn "$(pwd)/vscode-pspscript" ~/.vscode/extensions/pspscript-0.2.0
 ```
 
 ## Package as `.vsix` (Optional)
@@ -16,5 +16,5 @@ ln -sfn "$(pwd)/vscode-pspscript" ~/.vscode/extensions/pspscript-0.1.0
 ```bash
 cd vscode-pspscript
 npx @vscode/vsce package
-code --install-extension pspscript-0.1.0.vsix
+code --install-extension pspscript-0.2.0.vsix
 ```
