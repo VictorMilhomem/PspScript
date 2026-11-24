@@ -384,10 +384,8 @@ public sealed partial class CCodeGenerator
             "sprite" when emitted.Count >= 3 =>
                 $"psps_draw_sprite({emitted[0]}, {emitted[1]}, {emitted[2]})",
 
-            "draw_subsprite" when emitted.Count == 3 =>
-                $"psps_draw_subsprite({emitted[0]}, {emitted[1]}, {emitted[2]}, PSPS_COLOR_WHITE)",
-            "draw_subsprite" when emitted.Count >= 4 =>
-                $"psps_draw_subsprite({emitted[0]}, {emitted[1]}, {emitted[2]}, {emitted[3]})",
+            "draw_subsprite" when emitted.Count >= 3 =>
+                EmitDrawSubspriteCall(args, emitted),
 
             "draw_tilemap" when emitted.Count == 5 =>
                 $"psps_draw_tilemap({emitted[0]}, &(psps_tilemap_t){{ .tiles = (const uint8_t*)({emitted[1]}), .cols = (uint16_t)({emitted[2]}), .rows = (uint16_t)({emitted[3]}), .tile_size = (uint16_t)({emitted[4]}) }}, vec2_make(0.0f, 0.0f), PSPS_COLOR_WHITE)",
@@ -445,6 +443,7 @@ public sealed partial class CCodeGenerator
             "cos" when emitted.Count == 1 => $"cosf((float)({emitted[0]}))",
             "sqrt" when emitted.Count == 1 => $"sqrtf((float)({emitted[0]}))",
             "abs" when emitted.Count == 1 => $"fabsf((float)({emitted[0]}))",
+            "floor" when emitted.Count == 1 => $"((int32_t)floorf((float)({emitted[0]})))",
             "min" when emitted.Count == 2 => $"fminf((float)({emitted[0]}), (float)({emitted[1]}))",
             "max" when emitted.Count == 2 => $"fmaxf((float)({emitted[0]}), (float)({emitted[1]}))",
             "clamp" when emitted.Count == 3 =>
@@ -457,5 +456,31 @@ public sealed partial class CCodeGenerator
 
             _ => $"/* intrinsic {name} */ (void)0"
         };
+    }
+
+    private string EmitDrawSubspriteCall(IReadOnlyList<Expr> args, List<string> emitted)
+    {
+        if (emitted.Count == 3)
+        {
+            return $"psps_draw_subsprite({emitted[0]}, {emitted[1]}, {emitted[2]}, PSPS_COLOR_WHITE)";
+        }
+
+        ResolvedType arg3Type = _model.GetTypeOrDefault(args[3]);
+        if (arg3Type == ResolvedType.Bool)
+        {
+            string flipX = emitted[3];
+            string flipY = emitted.Count >= 5 ? emitted[4] : "false";
+            return $"psps_draw_subsprite_ex({emitted[0]}, {emitted[1]}, {emitted[2]}, PSPS_COLOR_WHITE, {flipX}, {flipY})";
+        }
+
+        if (emitted.Count == 4)
+        {
+            return $"psps_draw_subsprite({emitted[0]}, {emitted[1]}, {emitted[2]}, {emitted[3]})";
+        }
+
+        string tint = emitted[3];
+        string fx = emitted[4];
+        string fy = emitted.Count >= 6 ? emitted[5] : "false";
+        return $"psps_draw_subsprite_ex({emitted[0]}, {emitted[1]}, {emitted[2]}, {tint}, {fx}, {fy})";
     }
 }

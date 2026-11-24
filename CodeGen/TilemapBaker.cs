@@ -5,6 +5,14 @@ using PspScript.Semantics;
 
 namespace PspScript.CodeGen;
 
+internal sealed record BakedTilesetRef(
+    ushort FirstGid,
+    ushort TileSize,
+    string? ExplicitAssetName,
+    string? ImagePath,
+    BakedPixelFormat Format
+);
+
 internal sealed record BakedTilemapAsset(
     string Name,
     ushort Cols,
@@ -14,15 +22,13 @@ internal sealed record BakedTilemapAsset(
     ushort[] Layers,
     byte[] Collision,
     bool IsMutable,
-    string? ExplicitTilesetAssetName,
-    string? AutoTilesetImagePath,
-    BakedPixelFormat AutoTilesetFormat
+    IReadOnlyList<BakedTilesetRef> Tilesets
 );
 
 /// <summary>
 /// Compile-time Tiled (.tmx / .tmj) map baker powered by DotTiled.
-/// Extracts multi-layer uint16_t tile grids (14-bit tile ID + H/V flip bits)
-/// and a compact static collision grid for zero-heap C99 emission.
+/// Extracts multi-layer uint16_t tile grids (14-bit global tile ID + H/V flip bits),
+/// multi-tileset firstgid metadata, and a compact static collision grid for zero-heap C99 emission.
 /// </summary>
 internal static class TilemapBaker
 {
@@ -34,6 +40,7 @@ internal static class TilemapBaker
     {
         string? explicitTileset = GetIdentifierOption(asset.Declaration.Options, "tileset");
         string collisionLayerName = GetStringOption(asset.Declaration.Options, "collision_layer") ?? "Collision";
+        bool? explicitDrawCollision = GetBoolOption(asset.Declaration.Options, "draw_collision");
         BakedPixelFormat autoFormat = AssetBaker.ResolveRequestedFormat(asset.Declaration.Options);
 
         string? resolvedPath = AssetBaker.ResolveAssetPath(
@@ -58,56 +65,105 @@ internal static class TilemapBaker
             ushort tileSize = (ushort)Math.Max(1, map.TileWidth);
             int cellCount = cols * rows;
 
-            // Collect solid tile IDs (0-based local tile IDs) and optional auto-baked tileset image path
-            var solidLocalTileIds = new HashSet<uint>();
-            uint primaryFirstGid = 1u;
-            string? autoTilesetImagePath = null;
+            // Collect all tilesets (sorted ascending by firstgid) and solid GLOBAL tile IDs
+            var solidGlobalTileIds = new HashSet<uint>();
+            var bakedTilesets = new List<BakedTilesetRef>();
+            string? mapDir = Path.GetDirectoryName(resolvedPath);
 
             if (map.Tilesets is { Count: > 0 })
             {
-                var primaryTs = map.Tilesets[0];
-                primaryFirstGid = (primaryTs.FirstGID.HasValue && primaryTs.FirstGID.Value > 0)
-                    ? primaryTs.FirstGID.Value
-                    : 1u;
+                var orderedTilesets = map.Tilesets
+                    .Select(ts => (Tileset: ts, FirstGid: (ts.FirstGID.HasValue && ts.FirstGID.Value > 0) ? ts.FirstGID.Value : 1u))
+                    .OrderBy(static x => x.FirstGid)
+                    .ToList();
 
-                if (explicitTileset is null && primaryTs.Image.HasValue && primaryTs.Image.Value.Source.HasValue)
+                for (int tsIdx = 0; tsIdx < orderedTilesets.Count; tsIdx++)
                 {
-                    string rawImgSource = primaryTs.Image.Value.Source.Value;
-                    string? mapDir = Path.GetDirectoryName(resolvedPath);
-                    string? tsDir = primaryTs.Source.HasValue && mapDir is not null
-                        ? Path.GetDirectoryName(Path.GetFullPath(Path.Combine(mapDir, primaryTs.Source.Value)))
-                        : mapDir;
+                    var (ts, firstGid) = orderedTilesets[tsIdx];
+                    ushort tsTileSize = (ushort)(ts.TileWidth > 0 ? ts.TileWidth : tileSize);
 
-                    autoTilesetImagePath = AssetBaker.ResolveAssetPath(rawImgSource, tsDir, mapDir);
-                }
-
-                foreach (var ts in map.Tilesets)
-                {
-                    if (ts.Tiles is null)
-                        continue;
-
-                    foreach (var tile in ts.Tiles)
+                    if (firstGid > TileIdMask)
                     {
-                        if (tile.Properties is null)
-                            continue;
+                        Console.Error.WriteLine(
+                            $"Warning: Tilemap '{asset.Name}' tileset has firstgid={firstGid} exceeding 14-bit tile ID limit ({TileIdMask}); its tiles may not render properly.");
+                    }
 
-                        foreach (var prop in tile.Properties)
+                    if (tsIdx == 0 && explicitTileset is not null)
+                    {
+                        bakedTilesets.Add(new BakedTilesetRef(
+                            FirstGid: (ushort)Math.Min(firstGid, TileIdMask),
+                            TileSize: tsTileSize,
+                            ExplicitAssetName: explicitTileset,
+                            ImagePath: null,
+                            Format: autoFormat
+                        ));
+                    }
+                    else
+                    {
+                        string? resolvedImgPath = null;
+                        if (ts.Image.HasValue && ts.Image.Value.Source.HasValue)
                         {
-                            if (prop is BoolProperty boolProp &&
-                                string.Equals(boolProp.Name, "solid", StringComparison.OrdinalIgnoreCase) &&
-                                boolProp.Value)
+                            string rawImgSource = ts.Image.Value.Source.Value;
+                            string? tsDir = ts.Source.HasValue && mapDir is not null
+                                ? Path.GetDirectoryName(Path.GetFullPath(Path.Combine(mapDir, ts.Source.Value)))
+                                : mapDir;
+
+                            resolvedImgPath = AssetBaker.ResolveAssetPath(rawImgSource, tsDir, mapDir);
+                        }
+
+                        if (resolvedImgPath is null)
+                        {
+                            string tsLabel = ts.Source.HasValue ? ts.Source.Value : (ts.Name ?? $"index {tsIdx}");
+                            Console.Error.WriteLine(
+                                $"Warning: Tilemap '{asset.Name}' tileset '{tsLabel}' (firstgid={firstGid}) has no single atlas image or its PNG was not found; its tiles will not render.");
+                        }
+
+                        bakedTilesets.Add(new BakedTilesetRef(
+                            FirstGid: (ushort)Math.Min(firstGid, TileIdMask),
+                            TileSize: tsTileSize,
+                            ExplicitAssetName: null,
+                            ImagePath: resolvedImgPath,
+                            Format: autoFormat
+                        ));
+                    }
+
+                    // Collect solid tile IDs using GLOBAL tile IDs (firstGid + local tile.ID)
+                    if (ts.Tiles is not null)
+                    {
+                        foreach (var tile in ts.Tiles)
+                        {
+                            if (tile.Properties is null)
+                                continue;
+
+                            if (HasSolidProperty(tile.Properties))
                             {
-                                solidLocalTileIds.Add(tile.ID);
+                                solidGlobalTileIds.Add(firstGid + tile.ID);
                             }
                         }
                     }
                 }
             }
+            else if (explicitTileset is not null)
+            {
+                bakedTilesets.Add(new BakedTilesetRef(
+                    FirstGid: 1,
+                    TileSize: tileSize,
+                    ExplicitAssetName: explicitTileset,
+                    ImagePath: null,
+                    Format: autoFormat
+                ));
+            }
+
+            var allTileLayers = EnumerateTileLayers(map.Layers).ToList();
+            bool hasOtherVisibleVisualLayer = allTileLayers.Any(l =>
+                l.Visible && !string.Equals(l.Name, collisionLayerName, StringComparison.OrdinalIgnoreCase));
 
             var renderLayers = new List<ushort[]>();
             byte[] collision = new byte[cellCount];
+            bool anyVisibleTileRendered = false;
+            bool gidOverflowWarned = false;
 
-            foreach (var tileLayer in EnumerateTileLayers(map.Layers))
+            foreach (var tileLayer in allTileLayers)
             {
                 if (!tileLayer.Data.HasValue || !tileLayer.Data.Value.GlobalTileIDs.HasValue)
                     continue;
@@ -139,11 +195,15 @@ internal static class TilemapBaker
                             }
                         }
                     }
+
+                    bool shouldRenderCollision = explicitDrawCollision ?? !hasOtherVisibleVisualLayer;
+                    if (!shouldRenderCollision || !tileLayer.Visible)
+                        continue;
+                }
+                else if (!tileLayer.Visible)
+                {
                     continue;
                 }
-
-                if (!tileLayer.Visible)
-                    continue;
 
                 ushort[] layerCells = new ushort[cellCount];
                 for (int r = 0; r < Math.Min(rows, layerHeight); r++)
@@ -158,13 +218,19 @@ internal static class TilemapBaker
                         if (gid == 0u)
                             continue;
 
-                        uint localOneBased = gid >= primaryFirstGid ? (gid - primaryFirstGid + 1u) : gid;
-                        if (localOneBased > 0u && solidLocalTileIds.Contains(localOneBased - 1u))
+                        if (solidGlobalTileIds.Contains(gid))
                         {
                             collision[r * cols + c] = 1;
                         }
 
-                        ushort packed = (ushort)(localOneBased & TileIdMask);
+                        if (gid > TileIdMask && !gidOverflowWarned)
+                        {
+                            gidOverflowWarned = true;
+                            Console.Error.WriteLine(
+                                $"Warning: Tilemap '{asset.Name}' contains tile GID {gid} exceeding 14-bit limit ({TileIdMask}).");
+                        }
+
+                        ushort packed = (ushort)(gid & TileIdMask);
                         if (flags is not null && srcIdx < flags.Length)
                         {
                             FlippingFlags f = flags[srcIdx];
@@ -175,10 +241,17 @@ internal static class TilemapBaker
                         }
 
                         layerCells[r * cols + c] = packed;
+                        anyVisibleTileRendered = true;
                     }
                 }
 
                 renderLayers.Add(layerCells);
+            }
+
+            if (!anyVisibleTileRendered)
+            {
+                Console.Error.WriteLine(
+                    $"Warning: Tilemap '{asset.Name}' produced no visible tiles (check layer visibility or pass 'draw_collision: true').");
             }
 
             if (renderLayers.Count == 0)
@@ -202,9 +275,7 @@ internal static class TilemapBaker
                 Layers: flatLayers,
                 Collision: collision,
                 IsMutable: asset.IsMutable,
-                ExplicitTilesetAssetName: explicitTileset,
-                AutoTilesetImagePath: autoTilesetImagePath,
-                AutoTilesetFormat: autoFormat
+                Tilesets: bakedTilesets
             );
         }
         catch (Exception ex)
@@ -212,6 +283,35 @@ internal static class TilemapBaker
             Console.Error.WriteLine($"Warning: Failed to bake tilemap '{resolvedPath}' for asset '{asset.Name}': {ex.Message}. Using 1x1 empty placeholder.");
             return CreatePlaceholder(asset.Name, asset.IsMutable, explicitTileset, autoFormat);
         }
+    }
+
+    private static bool HasSolidProperty(IEnumerable<IProperty> properties)
+    {
+        foreach (var prop in properties)
+        {
+            if (prop is BoolProperty boolProp &&
+                string.Equals(boolProp.Name, "solid", StringComparison.OrdinalIgnoreCase) &&
+                boolProp.Value)
+            {
+                return true;
+            }
+
+            if (prop is IntProperty intProp &&
+                string.Equals(intProp.Name, "solid", StringComparison.OrdinalIgnoreCase) &&
+                intProp.Value != 0)
+            {
+                return true;
+            }
+
+            if (prop is StringProperty strProp &&
+                string.Equals(strProp.Name, "solid", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(strProp.Value, "true", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static IEnumerable<TileLayer> EnumerateTileLayers(IEnumerable<BaseLayer>? layers)
@@ -261,12 +361,29 @@ internal static class TilemapBaker
         return null;
     }
 
+    private static bool? GetBoolOption(IReadOnlyList<NamedArg> options, string name)
+    {
+        foreach (var opt in options)
+        {
+            if (string.Equals(opt.Name, name, StringComparison.OrdinalIgnoreCase) &&
+                opt.Value is BooleanLiteralExpr b)
+            {
+                return b.Value;
+            }
+        }
+        return null;
+    }
+
     private static BakedTilemapAsset CreatePlaceholder(
         string name,
         bool isMutable,
         string? explicitTileset,
         BakedPixelFormat autoFormat)
     {
+        var tilesets = explicitTileset is not null
+            ? new List<BakedTilesetRef> { new(1, 16, explicitTileset, null, autoFormat) }
+            : new List<BakedTilesetRef>();
+
         return new BakedTilemapAsset(
             Name: name,
             Cols: 1,
@@ -276,9 +393,7 @@ internal static class TilemapBaker
             Layers: [0],
             Collision: [0],
             IsMutable: isMutable,
-            ExplicitTilesetAssetName: explicitTileset,
-            AutoTilesetImagePath: null,
-            AutoTilesetFormat: autoFormat
+            Tilesets: tilesets
         );
     }
 }

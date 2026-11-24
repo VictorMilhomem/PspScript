@@ -544,7 +544,7 @@ fn season_speed(s: Season) -> f32 {
 | `clear_screen` | `(color) -> void` | Clears the screen with an ABGR8888 color |
 | `draw_rect` | `(rect, color) -> void` | Draws a filled rectangle |
 | `sprite` | `(asset, vec2[, color]) -> void` | Draws a baked texture at `pos` with optional tint |
-| `draw_subsprite` | `(asset, rect, vec2[, color]) -> void` | Draws a sub-rectangle (`src_rect`) from a spritesheet at `pos` |
+| `draw_subsprite` | `(asset, rect, vec2[, color][, bool[, bool]]) -> void` | Draws a sub-rectangle (`src_rect`) from a spritesheet at `pos`, with optional `tint`, `flip_x`, and `flip_y` |
 | `draw_tilemap` | `(asset, [N]u8, int, int, int[, vec2]) -> void` | Draws a culled tilemap grid (`cols`, `rows`, `tile_size`, optional `origin`) |
 | `set_camera` | `(vec2) -> void` | Sets the 2D world camera offset (`camera_pos`) |
 | `get_camera` | `() -> vec2` | Returns the current 2D camera offset |
@@ -575,7 +575,7 @@ PSP button bitmasks (matching `Runtime/psps_input.h`):
 
 ### Single-Precision Math Intrinsics
 
-`sin(x)`, `cos(x)`, `sqrt(x)`, `abs(x)`, `min(a, b)`, `max(a, b)`, `clamp(val, low, high)`, `lerp(a, b, t)`.
+`sin(x)`, `cos(x)`, `sqrt(x)`, `abs(x)`, `floor(x) -> int`, `min(a, b)`, `max(a, b)`, `clamp(val, low, high)`, `lerp(a, b, t)`.
 
 ### Standard Library Modules (`StdLib/`)
 
@@ -687,15 +687,18 @@ state Overworld {
 
 ### Compile-Time Baked Tiled Tilemaps (`.tmx` / `.tmj`)
 
-For full levels authored in [Tiled](https://www.mapeditor.org/), declare a `tilemap` asset. PSPScript bakes all visible tile layers (`uint16_t` cells with 14-bit tile IDs + H/V flip flags) and a compact collision grid (from a `"Collision"` layer and/or tiles with a `solid = true` boolean property) directly into static C99 arrays at compile time:
+For full levels authored in [Tiled](https://www.mapeditor.org/), declare a `tilemap` asset. PSPScript bakes all visible tile layers (`uint16_t` cells with 14-bit global tile IDs + H/V flip flags), **multiple `<tileset>` / `.tsx` atlases** (resolved automatically by `firstgid`), and a compact collision grid (from a `"Collision"` layer and/or `<tile>` `solid = true` properties in any `.tsx`) directly into static C99 arrays at compile time:
 
 ```pspscript
 // Share an explicit texture across multiple maps (saves PSP VRAM)
 asset world_sheet = texture("tiles.png", format: ABGR8888)
 asset level1 = tilemap("maps/level1.tmx", tileset: world_sheet)
 
-// Or auto-bake the tileset PNG from Tiled + enable runtime tile edits (auto-reset on 'goto')
+// Or auto-bake one or more .tsx tileset PNGs from Tiled + enable runtime tile edits (auto-reset on 'goto')
 asset farm = tilemap("maps/farm.tmj", mutable: true, collision_layer: "Collision")
+
+// Single-layer solid terrain (automatically drawn if it's the only layer, or force with draw_collision: true)
+asset stage = tilemap("maps/stage.tmx", collision_layer: "Terrain", draw_collision: true)
 
 state Overworld {
     player_box: rect = { 32.0, 32.0, 14.0, 14.0 }

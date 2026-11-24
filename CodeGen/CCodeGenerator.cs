@@ -222,29 +222,50 @@ public sealed partial class CCodeGenerator
             var bakedMap = TilemapBaker.BakeTilemap(asset, _sourceBaseDir);
             _bakedTilemaps[asset.Name] = bakedMap;
 
-            string tilesetPtrExpr = "NULL";
-            if (bakedMap.ExplicitTilesetAssetName is not null)
+            var tilesetEntries = new List<(string PtrExpr, ushort FirstGid, ushort TileSize)>();
+            foreach (var tsRef in bakedMap.Tilesets)
             {
-                tilesetPtrExpr = $"&g_asset_{bakedMap.ExplicitTilesetAssetName}";
-            }
-            else if (bakedMap.AutoTilesetImagePath is not null)
-            {
-                if (_bakedTexturePathToCVar.TryGetValue(bakedMap.AutoTilesetImagePath, out string? existingCVar))
+                string ptrExpr = "NULL";
+                if (tsRef.ExplicitAssetName is not null)
                 {
-                    tilesetPtrExpr = $"&{existingCVar}";
+                    ptrExpr = $"&g_asset_{tsRef.ExplicitAssetName}";
                 }
-                else
+                else if (tsRef.ImagePath is not null)
                 {
-                    string autoCVar = $"g_autobaked_tex_{++_autoTextureCounter}";
-                    var autoBaked = AssetBaker.BakeTextureFromPath(autoCVar, bakedMap.AutoTilesetImagePath, bakedMap.AutoTilesetFormat);
-                    _texturesToUpload.Add((autoCVar, autoBaked));
-                    _bakedTexturePathToCVar[bakedMap.AutoTilesetImagePath] = autoCVar;
-                    EmitBakedTextureCArray(autoCVar, autoBaked, $"Auto-baked Tileset for '{asset.Name}' ({autoBaked.Width}x{autoBaked.Height}, {autoBaked.Format})");
-                    tilesetPtrExpr = $"&{autoCVar}";
+                    if (_bakedTexturePathToCVar.TryGetValue(tsRef.ImagePath, out string? existingCVar))
+                    {
+                        ptrExpr = $"&{existingCVar}";
+                    }
+                    else
+                    {
+                        string autoCVar = $"g_autobaked_tex_{++_autoTextureCounter}";
+                        var autoBaked = AssetBaker.BakeTextureFromPath(autoCVar, tsRef.ImagePath, tsRef.Format);
+                        _texturesToUpload.Add((autoCVar, autoBaked));
+                        _bakedTexturePathToCVar[tsRef.ImagePath] = autoCVar;
+                        EmitBakedTextureCArray(autoCVar, autoBaked, $"Auto-baked Tileset for '{asset.Name}' (firstgid={tsRef.FirstGid}, {autoBaked.Width}x{autoBaked.Height}, {autoBaked.Format})");
+                        ptrExpr = $"&{autoCVar}";
+                    }
                 }
+
+                tilesetEntries.Add((ptrExpr, tsRef.FirstGid, tsRef.TileSize));
             }
 
-            _writer.WriteLine($"/* Baked Tilemap '{asset.Name}' (\"{asset.FilePath}\", {bakedMap.Cols}x{bakedMap.Rows}, {bakedMap.TileSize}px, {bakedMap.LayerCount} layer(s), mutable: {(bakedMap.IsMutable ? "true" : "false")}) */");
+            string primaryTilesetPtrExpr = tilesetEntries.Count > 0 ? tilesetEntries[0].PtrExpr : "NULL";
+            string tilesetsArrayExpr = "NULL";
+            if (tilesetEntries.Count > 0)
+            {
+                tilesetsArrayExpr = $"g_asset_{asset.Name}_tilesets";
+                _writer.OpenBlock($"static const psps_tilemap_tileset_t {tilesetsArrayExpr}[{tilesetEntries.Count}] =");
+                for (int t = 0; t < tilesetEntries.Count; t++)
+                {
+                    var entry = tilesetEntries[t];
+                    string comma = t + 1 < tilesetEntries.Count ? "," : string.Empty;
+                    _writer.WriteLine($"{{ .texture = {entry.PtrExpr}, .first_gid = {entry.FirstGid}u, .tile_size = {entry.TileSize}u }}{comma}");
+                }
+                _writer.CloseBlock(";");
+            }
+
+            _writer.WriteLine($"/* Baked Tilemap '{asset.Name}' (\"{asset.FilePath}\", {bakedMap.Cols}x{bakedMap.Rows}, {bakedMap.TileSize}px, {bakedMap.LayerCount} layer(s), {tilesetEntries.Count} tileset(s), mutable: {(bakedMap.IsMutable ? "true" : "false")}) */");
 
             EmitUInt16Array($"g_asset_{asset.Name}_layers_ro", bakedMap.Layers, isConst: true);
             EmitUInt8Array($"g_asset_{asset.Name}_collision_ro", bakedMap.Collision, isConst: true);
@@ -260,7 +281,9 @@ public sealed partial class CCodeGenerator
             }
 
             _writer.OpenBlock($"static psps_baked_tilemap_t g_asset_{asset.Name} =");
-            _writer.WriteLine($".tileset = {tilesetPtrExpr},");
+            _writer.WriteLine($".tileset = {primaryTilesetPtrExpr},");
+            _writer.WriteLine($".tilesets = {tilesetsArrayExpr},");
+            _writer.WriteLine($".tileset_count = {tilesetEntries.Count}u,");
             _writer.WriteLine($".cols = {bakedMap.Cols}u,");
             _writer.WriteLine($".rows = {bakedMap.Rows}u,");
             _writer.WriteLine($".tile_size = {bakedMap.TileSize}u,");

@@ -334,6 +334,9 @@ public sealed class SymbolTable
         RegisterBuiltin("abs", ResolvedType.F32, isVariadic: false,
             new ParamSymbol("value", ResolvedType.F32));
 
+        RegisterBuiltin("floor", ResolvedType.Int, isVariadic: false,
+            new ParamSymbol("value", ResolvedType.F32));
+
         RegisterBuiltin("min", ResolvedType.F32, isVariadic: false,
             new ParamSymbol("a", ResolvedType.F32),
             new ParamSymbol("b", ResolvedType.F32));

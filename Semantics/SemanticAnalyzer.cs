@@ -840,6 +840,24 @@ public sealed class SemanticAnalyzer
                     }
                     continue;
                 }
+
+                if (string.Equals(opt.Name, "draw_collision", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (opt.Value is not BooleanLiteralExpr)
+                    {
+                        ReportError(
+                            $"Tilemap '{asset.Name}' option 'draw_collision' must be a boolean literal ('true' or 'false').",
+                            opt.Span
+                        );
+                        _model.RecordType(opt, ResolvedType.Error);
+                    }
+                    else
+                    {
+                        _model.RecordType(opt.Value, ResolvedType.Bool);
+                        _model.RecordType(opt, ResolvedType.Bool);
+                    }
+                    continue;
+                }
             }
 
             ResolvedType optType = opt.Value is IdentifierExpr optId &&
@@ -2651,6 +2669,66 @@ public sealed class SemanticAnalyzer
                     arguments[i].Span
                 );
             }
+        }
+
+        if (string.Equals(callableName, "draw_subsprite", StringComparison.Ordinal) && arguments.Count > 3)
+        {
+            ValidateDrawSubspriteOptionalArgs(arguments, callSpan);
+        }
+    }
+
+    private void ValidateDrawSubspriteOptionalArgs(IReadOnlyList<Expr> arguments, SourceSpan callSpan)
+    {
+        if (arguments.Count > 6)
+        {
+            ReportError($"Function 'draw_subsprite' expects at most 6 arguments, got {arguments.Count}.", callSpan);
+            return;
+        }
+
+        ResolvedType arg3Type = _model.GetTypeOrDefault(arguments[3]);
+        if (arg3Type.IsError)
+            return;
+
+        if (arg3Type == ResolvedType.Color)
+        {
+            if (arguments.Count >= 5)
+            {
+                ResolvedType arg4Type = _model.GetTypeOrDefault(arguments[4]);
+                if (!ResolvedType.IsAssignableTo(arg4Type, ResolvedType.Bool))
+                {
+                    ReportError($"Argument 5 ('flip_x') of 'draw_subsprite' expects 'bool', got '{arg4Type}'.", arguments[4].Span);
+                }
+            }
+            if (arguments.Count == 6)
+            {
+                ResolvedType arg5Type = _model.GetTypeOrDefault(arguments[5]);
+                if (!ResolvedType.IsAssignableTo(arg5Type, ResolvedType.Bool))
+                {
+                    ReportError($"Argument 6 ('flip_y') of 'draw_subsprite' expects 'bool', got '{arg5Type}'.", arguments[5].Span);
+                }
+            }
+        }
+        else if (arg3Type == ResolvedType.Bool)
+        {
+            if (arguments.Count >= 5)
+            {
+                ResolvedType arg4Type = _model.GetTypeOrDefault(arguments[4]);
+                if (!ResolvedType.IsAssignableTo(arg4Type, ResolvedType.Bool))
+                {
+                    ReportError($"Argument 5 ('flip_y') of 'draw_subsprite' expects 'bool', got '{arg4Type}'.", arguments[4].Span);
+                }
+            }
+            if (arguments.Count == 6)
+            {
+                ReportError("Function 'draw_subsprite(tex, src, pos, flip_x, flip_y)' expects at most 5 arguments when tint is omitted.", callSpan);
+            }
+        }
+        else
+        {
+            ReportError(
+                $"Argument 4 of 'draw_subsprite' expects 'color' (tint) or 'bool' (flip_x), got '{arg3Type}'.",
+                arguments[3].Span
+            );
         }
     }
 

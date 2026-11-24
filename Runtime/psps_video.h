@@ -30,16 +30,24 @@ typedef struct psps_tilemap {
 #define PSPS_TILE_FLIP_H  0x8000u
 #define PSPS_TILE_FLIP_V  0x4000u
 
+typedef struct psps_tilemap_tileset {
+    const psps_texture_t* texture;       /* Uploaded VRAM tileset texture                  */
+    uint16_t              first_gid;     /* 1-based first GID in this tilemap              */
+    uint16_t              tile_size;     /* Tile size in pixels (0 = use map->tile_size)   */
+} psps_tilemap_tileset_t;
+
 typedef struct psps_baked_tilemap {
-    const psps_texture_t* tileset;       /* Uploaded VRAM tileset texture                  */
-    uint16_t              cols;          /* Map width in tiles                             */
-    uint16_t              rows;          /* Map height in tiles                            */
-    uint16_t              tile_size;     /* Square tile size in pixels (e.g. 8, 16, 32)    */
-    uint16_t              layer_count;   /* Number of renderable tile layers               */
-    uint16_t*             layers_mut;    /* Writable .bss [layer_count * cols * rows] or 0 */
-    const uint16_t*       layers_ro;     /* Pristine .rodata [layer_count * cols * rows]   */
-    uint8_t*              collision_mut; /* Writable .bss [cols * rows] or NULL            */
-    const uint8_t*        collision_ro;  /* Pristine .rodata [cols * rows]                 */
+    const psps_texture_t*         tileset;       /* Primary tileset texture (compat / fallback)    */
+    const psps_tilemap_tileset_t* tilesets;      /* Sorted ascending by first_gid (or NULL)        */
+    uint16_t                      tileset_count; /* Number of entries in tilesets                  */
+    uint16_t                      cols;          /* Map width in tiles                             */
+    uint16_t                      rows;          /* Map height in tiles                            */
+    uint16_t                      tile_size;     /* Square tile size in pixels (e.g. 8, 16, 32)    */
+    uint16_t                      layer_count;   /* Number of renderable tile layers               */
+    uint16_t*                     layers_mut;    /* Writable .bss [layer_count * cols * rows] or 0 */
+    const uint16_t*               layers_ro;     /* Pristine .rodata [layer_count * cols * rows]   */
+    uint8_t*                      collision_mut; /* Writable .bss [cols * rows] or NULL            */
+    const uint8_t*                collision_ro;  /* Pristine .rodata [cols * rows]                 */
 } psps_baked_tilemap_t;
 
 /* Lifecycle & Frame Timing */
@@ -68,6 +76,14 @@ void           psps_destroy_texture(psps_texture_t* texture);
 void psps_clear_screen(psps_color_t clear_abgr);
 void psps_draw_sprite(psps_texture_t texture, vec2_t pos, psps_color_t tint_abgr);
 void psps_draw_subsprite(psps_texture_t texture, rect_t src_rect, vec2_t pos, psps_color_t tint_abgr);
+void psps_draw_subsprite_ex(
+    psps_texture_t texture,
+    rect_t         src_rect,
+    vec2_t         pos,
+    psps_color_t   tint_abgr,
+    bool           flip_x,
+    bool           flip_y
+);
 void psps_draw_sprite_ex(
     psps_texture_t texture,
     const rect_t*  src_rect,
@@ -542,7 +558,14 @@ void psps_draw_sprite(psps_texture_t texture, vec2_t pos, psps_color_t tint_abgr
     SDL_RenderCopy(g_psps_video.renderer, texture.handle, NULL, &dst);
 }
 
-void psps_draw_subsprite(psps_texture_t texture, rect_t src_rect, vec2_t pos, psps_color_t tint_abgr) {
+void psps_draw_subsprite_ex(
+    psps_texture_t texture,
+    rect_t         src_rect,
+    vec2_t         pos,
+    psps_color_t   tint_abgr,
+    bool           flip_x,
+    bool           flip_y)
+{
     if (g_psps_video.renderer == NULL || !texture.valid || texture.handle == NULL) {
         return;
     }
@@ -571,7 +594,19 @@ void psps_draw_subsprite(psps_texture_t texture, rect_t src_rect, vec2_t pos, ps
         .h = (int)src_rect.h
     };
 
-    SDL_RenderCopy(g_psps_video.renderer, texture.handle, &sdl_src, &sdl_dst);
+    SDL_RendererFlip flip = SDL_FLIP_NONE;
+    if (flip_x) flip = (SDL_RendererFlip)(flip | SDL_FLIP_HORIZONTAL);
+    if (flip_y) flip = (SDL_RendererFlip)(flip | SDL_FLIP_VERTICAL);
+
+    if (flip == SDL_FLIP_NONE) {
+        SDL_RenderCopy(g_psps_video.renderer, texture.handle, &sdl_src, &sdl_dst);
+    } else {
+        SDL_RenderCopyEx(g_psps_video.renderer, texture.handle, &sdl_src, &sdl_dst, 0.0, NULL, flip);
+    }
+}
+
+void psps_draw_subsprite(psps_texture_t texture, rect_t src_rect, vec2_t pos, psps_color_t tint_abgr) {
+    psps_draw_subsprite_ex(texture, src_rect, pos, tint_abgr, false, false);
 }
 
 void psps_draw_sprite_ex(
@@ -695,8 +730,12 @@ void psps_draw_tilemap(
 }
 
 void psps_baked_tilemap_draw_layer(const psps_baked_tilemap_t* map, int32_t layer, vec2_t origin) {
-    if (g_psps_video.renderer == NULL || map == NULL || map->tileset == NULL ||
-        !map->tileset->valid || map->tileset->handle == NULL || map->tile_size == 0) {
+    if (g_psps_video.renderer == NULL || map == NULL || map->tile_size == 0) {
+        return;
+    }
+
+    bool has_multi = (map->tilesets != NULL && map->tileset_count > 0u);
+    if (!has_multi && (map->tileset == NULL || !map->tileset->valid || map->tileset->handle == NULL)) {
         return;
     }
     if (layer < 0 || layer >= (int32_t)map->layer_count) {
@@ -709,9 +748,22 @@ void psps_baked_tilemap_draw_layer(const psps_baked_tilemap_t* map, int32_t laye
     }
 
     int ts = (int)map->tile_size;
-    int sheet_cols = (int)map->tileset->width / ts;
-    if (sheet_cols <= 0) {
-        return;
+    int single_sheet_cols = 0;
+    if (has_multi) {
+        for (uint16_t t = 0u; t < map->tileset_count; ++t) {
+            const psps_texture_t* tex = map->tilesets[t].texture;
+            if (tex != NULL && tex->valid && tex->handle != NULL) {
+                SDL_SetTextureColorMod(tex->handle, 255u, 255u, 255u);
+                SDL_SetTextureAlphaMod(tex->handle, 255u);
+            }
+        }
+    } else {
+        single_sheet_cols = (int)map->tileset->width / ts;
+        if (single_sheet_cols <= 0) {
+            return;
+        }
+        SDL_SetTextureColorMod(map->tileset->handle, 255u, 255u, 255u);
+        SDL_SetTextureAlphaMod(map->tileset->handle, 255u);
     }
 
     vec2_t cam = g_psps_video.camera_enabled ? g_psps_video.camera_pos : vec2_make(0.0f, 0.0f);
@@ -726,9 +778,6 @@ void psps_baked_tilemap_draw_layer(const psps_baked_tilemap_t* map, int32_t laye
     if (max_col > (int)map->cols) max_col = (int)map->cols;
     if (max_row > (int)map->rows) max_row = (int)map->rows;
 
-    SDL_SetTextureColorMod(map->tileset->handle, 255u, 255u, 255u);
-    SDL_SetTextureAlphaMod(map->tileset->handle, 255u);
-
     size_t layer_offset = (size_t)layer * (size_t)map->cols * (size_t)map->rows;
 
     for (int r = min_row; r < max_row; ++r) {
@@ -739,12 +788,41 @@ void psps_baked_tilemap_draw_layer(const psps_baked_tilemap_t* map, int32_t laye
                 continue;
             }
 
-            int idx = (int)tile_id - 1;
+            SDL_Texture* tex_handle = NULL;
+            int idx = 0;
+            int sheet_cols = 0;
+            int src_ts = ts;
+
+            if (has_multi) {
+                const psps_tilemap_tileset_t* chosen = NULL;
+                for (int t = (int)map->tileset_count - 1; t >= 0; --t) {
+                    if (map->tilesets[t].first_gid <= tile_id) {
+                        chosen = &map->tilesets[t];
+                        break;
+                    }
+                }
+                if (chosen == NULL || chosen->texture == NULL ||
+                    !chosen->texture->valid || chosen->texture->handle == NULL) {
+                    continue;
+                }
+                src_ts = (chosen->tile_size > 0u) ? (int)chosen->tile_size : ts;
+                sheet_cols = (int)chosen->texture->width / src_ts;
+                if (sheet_cols <= 0) {
+                    continue;
+                }
+                idx = (int)tile_id - (int)chosen->first_gid;
+                tex_handle = chosen->texture->handle;
+            } else {
+                tex_handle = map->tileset->handle;
+                sheet_cols = single_sheet_cols;
+                idx = (int)tile_id - 1;
+            }
+
             SDL_Rect src = {
-                .x = (idx % sheet_cols) * ts,
-                .y = (idx / sheet_cols) * ts,
-                .w = ts,
-                .h = ts
+                .x = (idx % sheet_cols) * src_ts,
+                .y = (idx / sheet_cols) * src_ts,
+                .w = src_ts,
+                .h = src_ts
             };
 
             SDL_Rect dst = {
@@ -759,9 +837,9 @@ void psps_baked_tilemap_draw_layer(const psps_baked_tilemap_t* map, int32_t laye
             if ((raw & PSPS_TILE_FLIP_V) != 0u) flip = (SDL_RendererFlip)(flip | SDL_FLIP_VERTICAL);
 
             if (flip == SDL_FLIP_NONE) {
-                SDL_RenderCopy(g_psps_video.renderer, map->tileset->handle, &src, &dst);
+                SDL_RenderCopy(g_psps_video.renderer, tex_handle, &src, &dst);
             } else {
-                SDL_RenderCopyEx(g_psps_video.renderer, map->tileset->handle, &src, &dst, 0.0, NULL, flip);
+                SDL_RenderCopyEx(g_psps_video.renderer, tex_handle, &src, &dst, 0.0, NULL, flip);
             }
         }
     }

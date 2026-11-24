@@ -396,7 +396,7 @@ internal static class LspCompletionProvider
 
         // Asset loaders
         items.Add(new LspCompletionItem("texture", KindFunction, "texture(path, format: RGBA4444|ABGR8888)"));
-        items.Add(new LspCompletionItem("tilemap", KindFunction, "tilemap(path, tileset: ..., mutable: bool)"));
+        items.Add(new LspCompletionItem("tilemap", KindFunction, "tilemap(path, tileset: ..., mutable: bool, collision_layer: string, draw_collision: bool)"));
         items.Add(new LspCompletionItem("sound", KindFunction, "sound(path, rate: 44100|22050)"));
         items.Add(new LspCompletionItem("music", KindFunction, "music(path, rate: 44100|22050)"));
 
