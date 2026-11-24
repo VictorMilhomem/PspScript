@@ -1,8 +1,14 @@
 using System.Diagnostics;
 using PspScript.Ast;
 using PspScript.CodeGen;
+using PspScript.Lsp;
 using PspScript.Parsing;
 using PspScript.Semantics;
+
+if (args.Contains("--lsp"))
+{
+    return await PspLanguageServer.RunStdioAsync();
+}
 
 if (args.Length == 0 || args.Contains("-h") || args.Contains("--help"))
 {
@@ -158,7 +164,7 @@ Console.WriteLine($"      Emitted {cSource.Length:N0} bytes of static C99 to '{o
 if (buildDesktop)
 {
     Console.WriteLine("[Desktop] Building native Linux preview binary (make desktop)...");
-    int desktopExit = RunProcess("make", "desktop");
+    int desktopExit = RunDesktopBuild();
     if (desktopExit != 0)
     {
         Console.Error.WriteLine($"Error: Desktop build failed with exit code {desktopExit}.");
@@ -176,16 +182,37 @@ if (!buildEboot)
 }
 
 string gameTitle = model.Symbols.GameConfig?.Title ?? Path.GetFileNameWithoutExtension(inputPath);
-Console.WriteLine($"[4/4] Building PlayStation Portable EBOOT.PBP (Title: \"{gameTitle}\") via docker-compose.yml...");
+string buildDir = string.IsNullOrEmpty(outDir) ? "build" : outDir;
+string? configBaseDir = model.Symbols.GameConfig?.SourceDirectory ?? inputDir;
 
-int ebootExit = RunComposeBuild(gameTitle);
+if (!PspXmbStager.TryStageXmbPng(model.Symbols.IconPath, "icon", "ICON0.PNG", 144, 80, configBaseDir, inputDir, buildDir, out string stagedIcon))
+    return 1;
+if (!PspXmbStager.TryStageXmbPng(model.Symbols.BackgroundPath, "background", "PIC1.PNG", 480, 272, configBaseDir, inputDir, buildDir, out string stagedPic1))
+    return 1;
+if (!PspXmbStager.TryStageXmbPng(model.Symbols.OverlayPath, "overlay", "PIC0.PNG", 310, 180, configBaseDir, inputDir, buildDir, out string stagedPic0))
+    return 1;
+
+Console.WriteLine($"[4/4] Building PlayStation Portable EBOOT.PBP (Title: \"{gameTitle}\", ID: {model.Symbols.GameId}, v{model.Symbols.GameVersion}) via docker-compose.yml...");
+
+var pbpEnv = new Dictionary<string, string>(StringComparer.Ordinal)
+{
+    ["PSP_EBOOT_TITLE"]  = gameTitle,
+    ["PSP_GAME_ID"]      = model.Symbols.GameId,
+    ["PSP_APP_VER"]      = model.Symbols.GameVersion,
+    ["PSP_MEMSIZE"]      = model.Symbols.ExtraRam ? "1" : "0",
+    ["PSP_EBOOT_ICON"]   = stagedIcon,
+    ["PSP_EBOOT_PIC1"]   = stagedPic1,
+    ["PSP_EBOOT_UNKPNG"] = stagedPic0
+};
+
+int ebootExit = RunComposeBuild(pbpEnv);
 if (ebootExit != 0)
 {
     Console.Error.WriteLine($"Error: EBOOT.PBP container build failed with exit code {ebootExit}.");
     return ebootExit;
 }
 
-string ebootPath = Path.Combine(string.IsNullOrEmpty(outDir) ? "build" : outDir, "EBOOT.PBP");
+string ebootPath = Path.Combine(buildDir, "EBOOT.PBP");
 if (File.Exists(ebootPath))
 {
     var info = new FileInfo(ebootPath);
@@ -204,6 +231,7 @@ static void PrintUsage()
     PSPScript Compiler - Transpiles PSPScript (.psps) to Static C99 & PSP EBOOT.PBP
 
     Usage:
+      pspscript <input.psps> [options]
       dotnet run -- <input.psps> [options]
 
     Arguments:
@@ -215,12 +243,13 @@ static void PrintUsage()
       --desktop                 Also build native desktop preview executable (make desktop)
       --check                   Run syntax and semantic analysis only (no code generation)
       --dump-ast                Print parsed declarations and resolved semantic types
+      --lsp                     Start the PSPScript Language Server (LSP) over stdio
       -h, --help                Display this help message
 
     Examples:
-      dotnet run -- examples/pong/main.psps
-      dotnet run -- examples/pong/main.psps --c-only --desktop
-      dotnet run -- examples/pong/main.psps --check --dump-ast
+      pspscript examples/pong/main.psps
+      pspscript examples/pong/main.psps --c-only --desktop
+      pspscript examples/pong/main.psps --check --dump-ast
     """);
 }
 
@@ -270,6 +299,10 @@ static void PrintAstSummary(ProgramNode program, SemanticModel model)
                 Console.WriteLine($"  [Struct] {st.Name} ({st.Fields.Count} field(s))");
                 break;
 
+            case EnumDecl en:
+                Console.WriteLine($"  [Enum] {en.Name} ({en.Variants.Count} variant(s))");
+                break;
+
             case GlobalVarDecl gvar:
                 Console.WriteLine($"  [GlobalVar] ({gvar.Scope}) {gvar.Name} : {model.GetTypeOrDefault(gvar)}");
                 break;
@@ -290,30 +323,97 @@ static void PrintAstSummary(ProgramNode program, SemanticModel model)
     }
 }
 
-static int RunComposeBuild(string gameTitle)
+static int RunDesktopBuild()
 {
-    var env = new Dictionary<string, string>(StringComparer.Ordinal)
+    if (File.Exists("Makefile"))
     {
-        ["PSP_EBOOT_TITLE"] = gameTitle
+        return RunProcess("make", ["desktop"]);
+    }
+
+    string installDir = AppContext.BaseDirectory;
+    string bundledMakefile = Path.Combine(installDir, "Makefile");
+    string bundledRuntime = Path.Combine(installDir, "Runtime");
+
+    if (!File.Exists(bundledMakefile) || !Directory.Exists(bundledRuntime))
+    {
+        Console.Error.WriteLine($"Error: Could not find 'Makefile' in the current directory or in '{installDir}'.");
+        return 1;
+    }
+
+    return RunProcess("make", ["-f", bundledMakefile, $"RUNTIME_DIR={bundledRuntime}", "desktop"]);
+}
+
+static int RunComposeBuild(IDictionary<string, string> env)
+{
+    // In-repo / local compose workflow when docker-compose.yml exists in CWD
+    if (File.Exists("docker-compose.yml"))
+    {
+        if (IsCommandAvailable("podman-compose"))
+        {
+            return RunProcess("podman-compose", ["run", "--rm", "psp-builder"], env);
+        }
+
+        if (IsCommandAvailable("podman"))
+        {
+            return RunProcess("podman", ["compose", "run", "--rm", "psp-builder"], env);
+        }
+
+        if (IsCommandAvailable("docker"))
+        {
+            return RunProcess("docker", ["compose", "run", "--rm", "psp-builder"], env);
+        }
+
+        Console.Error.WriteLine("Error: Neither 'podman-compose', 'podman', nor 'docker' was found in PATH.");
+        return 1;
+    }
+
+    // Global CLI workflow from any external project directory: mount bundled Makefile + Runtime read-only
+    string? containerCmd = IsCommandAvailable("podman") ? "podman"
+                         : IsCommandAvailable("docker") ? "docker"
+                         : null;
+    if (containerCmd is null)
+    {
+        Console.Error.WriteLine("Error: Neither 'podman' nor 'docker' was found in PATH.");
+        return 1;
+    }
+
+    string installDir = AppContext.BaseDirectory;
+    string bundledMakefile = Path.Combine(installDir, "Makefile");
+    string bundledRuntime = Path.Combine(installDir, "Runtime");
+    if (!File.Exists(bundledMakefile) || !Directory.Exists(bundledRuntime))
+    {
+        Console.Error.WriteLine($"Error: Bundled PSP build assets ('Makefile' and 'Runtime/') not found in '{installDir}'.");
+        return 1;
+    }
+
+    string cwd = Directory.GetCurrentDirectory();
+    var args = new List<string>
+    {
+        "run", "--rm",
+        "-w", "/src",
+        "-v", $"{cwd}:/src:Z",
+        "-v", $"{bundledRuntime}:/opt/pspscript/Runtime:ro,Z",
+        "-v", $"{bundledMakefile}:/opt/pspscript/Makefile:ro,Z"
     };
 
-    if (IsCommandAvailable("podman-compose"))
+    foreach (var (key, value) in env)
     {
-        return RunProcess("podman-compose", "run --rm psp-builder", env);
+        args.Add("-e");
+        args.Add($"{key}={value}");
     }
 
-    if (IsCommandAvailable("podman"))
-    {
-        return RunProcess("podman", "compose run --rm psp-builder", env);
-    }
+    args.Add("docker.io/pspdev/pspdev:latest");
+    args.Add("sh");
+    args.Add("-c");
+    args.Add(
+        "PSPDEV_DIR=\"$(psp-config --pspdev-path)\"; " +
+        "if [ ! -f \"${PSPDEV_DIR}/psp/include/SDL2/SDL.h\" ]; then " +
+        "echo 'Installing PSP SDL2 via psp-pacman...'; " +
+        "psp-pacman -Sy --noconfirm sdl2; " +
+        "fi; " +
+        "make -f /opt/pspscript/Makefile -C /src RUNTIME_DIR=/opt/pspscript/Runtime && chmod -R a+rwX /src/build");
 
-    if (IsCommandAvailable("docker"))
-    {
-        return RunProcess("docker", "compose run --rm psp-builder", env);
-    }
-
-    Console.Error.WriteLine("Error: Neither 'podman-compose', 'podman', nor 'docker' was found in PATH.");
-    return 1;
+    return RunProcess(containerCmd, args);
 }
 
 static bool IsCommandAvailable(string binaryName)
@@ -332,15 +432,19 @@ static bool IsCommandAvailable(string binaryName)
     return false;
 }
 
-static int RunProcess(string fileName, string arguments, IDictionary<string, string>? extraEnv = null)
+static int RunProcess(string fileName, IEnumerable<string> arguments, IDictionary<string, string>? extraEnv = null)
 {
     var psi = new ProcessStartInfo
     {
         FileName = fileName,
-        Arguments = arguments,
         WorkingDirectory = Directory.GetCurrentDirectory(),
         UseShellExecute = false
     };
+
+    foreach (string arg in arguments)
+    {
+        psi.ArgumentList.Add(arg);
+    }
 
     if (extraEnv is not null)
     {

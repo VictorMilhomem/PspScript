@@ -15,13 +15,15 @@ public record ImportDecl(string Path) : TopDecl;
 
 public record GameConfigDecl(
     string Title,
-    IReadOnlyDictionary<string, ConfigValue> Settings
+    IReadOnlyDictionary<string, ConfigValue> Settings,
+    string? SourceDirectory = null
 ): TopDecl;
 
 public abstract record ConfigValue;
 public record IntConfigValue(int Value): ConfigValue;
 public record SizeConfigValue(long Bytes): ConfigValue; // Normalized from KB/MB
 public record StringConfigValue(string Value): ConfigValue;
+public record BoolConfigValue(bool Value): ConfigValue;
 public record IdentConfigValue(string Name): ConfigValue;
 
 public record AssetDecl(
@@ -40,6 +42,11 @@ public record MessageDecl(
 public record StructDecl(
     string Name,
     IReadOnlyList<FieldDecl> Fields
+): TopDecl;
+
+public record EnumDecl(
+    string Name,
+    IReadOnlyList<string> Variants
 ): TopDecl;
 
 public record ActorDecl(
@@ -165,7 +172,12 @@ public enum AssignOp
     AddAssign, // +=
     SubAssign, // -=
     MulAssign, // *=
-    DivAssign // /=
+    DivAssign, // /=
+    BitAndAssign, // &=
+    BitOrAssign, // |=
+    BitXorAssign, // ^=
+    ShiftLeftAssign, // <<=
+    ShiftRightAssign // >>=
 }
 
 public record IfStmt(
@@ -174,8 +186,36 @@ public record IfStmt(
     Stmt? ElseBranch
 ): Stmt;
 
-public record WhileStmt(
+public record MatchStmt(
+    Expr Scrutinee,
+    IReadOnlyList<MatchArm> Arms
+) : Stmt;
+
+public record MatchArm(
+    MatchPattern Pattern,
+    Stmt Body
+) : AstNode;
+
+public abstract record MatchPattern : AstNode;
+public record EnumVariantPattern(string EnumName, string VariantName) : MatchPattern;
+public record IntLiteralPattern(int Value) : MatchPattern;
+public record WildcardPattern() : MatchPattern;
+
+/// <summary>
+/// Go-style conditional loop: for cond { ... }
+/// </summary>
+public record ForStmt(
     Expr Condition,
+    BlockStmt Body
+) : Stmt;
+
+/// <summary>
+/// Exclusive integer range loop: for i in start..end { ... }
+/// </summary>
+public record ForRangeStmt(
+    string IteratorName,
+    Expr Start,
+    Expr End,
     BlockStmt Body
 ) : Stmt;
 
@@ -187,6 +227,8 @@ public record ForEachStmt(
     string PoolName,
     BlockStmt Body
 ) : Stmt;
+
+public record BreakStmt() : Stmt;
 
 public record ReturnStmt(Expr? Value) : Stmt;
 
@@ -244,7 +286,8 @@ public record UnaryExpr(UnaryOp Operator, Expr Operand): Expr;
 public enum UnaryOp
 {
     Negate, // -
-    Not // !
+    Not, // !
+    BitNot // ~
 }
 
 public record BinaryExpr(Expr Left, BinaryOp Op, Expr Right): Expr;
@@ -252,6 +295,8 @@ public record BinaryExpr(Expr Left, BinaryOp Op, Expr Right): Expr;
 public enum BinaryOp
 {
     Add, Sub, Mul, Div, Mod,
+    ShiftLeft, ShiftRight,
+    BitAnd, BitXor, BitOr,
     Equal, NotEqual,
     Less, LessEqual, Greater, GreaterEqual,
     LogicalAnd, LogicalOr

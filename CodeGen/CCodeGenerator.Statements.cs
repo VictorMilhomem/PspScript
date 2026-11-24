@@ -40,14 +40,26 @@ public sealed partial class CCodeGenerator
                 EmitIfStmt(ifStmt, ctx);
                 break;
 
-            case WhileStmt whileStmt:
-                _writer.OpenBlock($"while ({EmitExpr(whileStmt.Condition, ctx)})");
-                EmitBlockStatements(whileStmt.Body, ctx);
+            case MatchStmt matchStmt:
+                EmitMatchStmt(matchStmt, ctx);
+                break;
+
+            case ForStmt forStmt:
+                _writer.OpenBlock($"while ({EmitExpr(forStmt.Condition, ctx)})");
+                EmitBlockStatements(forStmt.Body, ctx);
                 _writer.CloseBlock();
+                break;
+
+            case ForRangeStmt forRangeStmt:
+                EmitForRangeStmt(forRangeStmt, ctx);
                 break;
 
             case ForEachStmt forEachStmt:
                 EmitForEachStmt(forEachStmt, ctx);
+                break;
+
+            case BreakStmt:
+                _writer.WriteLine("break;");
                 break;
 
             case ReturnStmt returnStmt:
@@ -156,6 +168,11 @@ public sealed partial class CCodeGenerator
             AssignOp.SubAssign => "-=",
             AssignOp.MulAssign => "*=",
             AssignOp.DivAssign => "/=",
+            AssignOp.BitAndAssign => "&=",
+            AssignOp.BitOrAssign => "|=",
+            AssignOp.BitXorAssign => "^=",
+            AssignOp.ShiftLeftAssign => "<<=",
+            AssignOp.ShiftRightAssign => ">>=",
             _ => "="
         };
 
@@ -176,6 +193,82 @@ public sealed partial class CCodeGenerator
         {
             _writer.OpenBlock("else");
             EmitBlockStatements(elseBlock, ctx);
+            _writer.CloseBlock();
+        }
+    }
+
+    private void EmitMatchStmt(MatchStmt matchStmt, EmissionContext ctx)
+    {
+        _writer.OpenBlock($"switch ({EmitExpr(matchStmt.Scrutinee, ctx)})");
+        bool hasDefault = false;
+
+        foreach (var arm in matchStmt.Arms)
+        {
+            string caseHeader = arm.Pattern switch
+            {
+                EnumVariantPattern ev => $"case {ev.EnumName}_{ev.VariantName}:",
+                IntLiteralPattern il => $"case {il.Value}:",
+                WildcardPattern => "default:",
+                _ => "default:"
+            };
+
+            if (arm.Pattern is WildcardPattern)
+            {
+                hasDefault = true;
+            }
+
+            _writer.OpenBlock(caseHeader);
+            if (arm.Body is BlockStmt block)
+            {
+                EmitBlockStatements(block, ctx);
+            }
+            else
+            {
+                EmitStmt(arm.Body, ctx.Clone());
+            }
+            _writer.WriteLine("break;");
+            _writer.CloseBlock();
+        }
+
+        if (!hasDefault)
+        {
+            _writer.WriteLine("default: __builtin_unreachable();");
+        }
+
+        _writer.CloseBlock();
+    }
+
+    private void EmitForRangeStmt(ForRangeStmt forRangeStmt, EmissionContext ctx)
+    {
+        string startExpr = EmitExpr(forRangeStmt.Start, ctx);
+        string endExpr = EmitExpr(forRangeStmt.End, ctx);
+
+        bool needsEndTemp = forRangeStmt.End is not (IntLiteralExpr or IdentifierExpr);
+        if (needsEndTemp)
+        {
+            int loopId = ++_loopCounter;
+            string endVar = $"_range_end_{loopId}";
+            _writer.OpenBlock();
+            _writer.WriteLine($"int32_t {endVar} = (int32_t)({endExpr});");
+            _writer.OpenBlock($"for (int32_t {forRangeStmt.IteratorName} = (int32_t)({startExpr}); {forRangeStmt.IteratorName} < {endVar}; ++{forRangeStmt.IteratorName})");
+            _writer.WriteLine($"(void){forRangeStmt.IteratorName};");
+
+            var loopCtx = ctx.Clone();
+            loopCtx.LocalVariables.Add(forRangeStmt.IteratorName);
+            EmitBlockStatements(forRangeStmt.Body, loopCtx);
+
+            _writer.CloseBlock();
+            _writer.CloseBlock();
+        }
+        else
+        {
+            _writer.OpenBlock($"for (int32_t {forRangeStmt.IteratorName} = (int32_t)({startExpr}); {forRangeStmt.IteratorName} < (int32_t)({endExpr}); ++{forRangeStmt.IteratorName})");
+            _writer.WriteLine($"(void){forRangeStmt.IteratorName};");
+
+            var loopCtx = ctx.Clone();
+            loopCtx.LocalVariables.Add(forRangeStmt.IteratorName);
+            EmitBlockStatements(forRangeStmt.Body, loopCtx);
+
             _writer.CloseBlock();
         }
     }

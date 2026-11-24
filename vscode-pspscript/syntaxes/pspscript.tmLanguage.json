@@ -58,7 +58,7 @@
     "declarations": {
       "patterns": [
         {
-          "match": "\\b(actor|state|message|struct)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "match": "\\b(actor|state|message|struct|enum)\\s+([A-Za-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": { "name": "storage.type.declaration.pspscript" },
             "2": { "name": "entity.name.type.pspscript" }
@@ -81,6 +81,13 @@
         {
           "match": "\\b(game)\\b",
           "name": "storage.type.game.pspscript"
+        },
+        {
+          "match": "\\b(import)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.control.import.pspscript" },
+            "2": { "name": "entity.name.namespace.pspscript" }
+          }
         },
         {
           "match": "\\b(import)\\b",
@@ -162,6 +169,10 @@
     "keywords": {
       "patterns": [
         {
+          "name": "storage.type.declaration.pspscript",
+          "match": "\\b(actor|state|message|struct|enum|fn|asset)\\b"
+        },
+        {
           "name": "storage.modifier.memory.pspscript",
           "match": "\\b(global|level|temp)\\b"
         },
@@ -171,7 +182,11 @@
         },
         {
           "name": "keyword.control.flow.pspscript",
-          "match": "\\b(if|else|while|each|in|return|goto)\\b"
+          "match": "\\b(if|else|match|for|each|in|break|return|goto)\\b"
+        },
+        {
+          "name": "constant.language.wildcard.pspscript",
+          "match": "\\b_\\b(?=\\s*=>)"
         },
         {
           "name": "keyword.control.actor.pspscript",
@@ -186,6 +201,14 @@
           "match": "\\b(int|u8|u16|u32|f32|bool|void|vec2|vec3|rect|color|timer|ref)\\b"
         },
         {
+          "match": "\\b([A-Z][A-Za-z0-9_]*)(\\.)([A-Za-z_][A-Za-z0-9_]*)\\b(?!\\s*\\()",
+          "captures": {
+            "1": { "name": "entity.name.type.pspscript" },
+            "2": { "name": "punctuation.accessor.pspscript" },
+            "3": { "name": "constant.other.enum.pspscript" }
+          }
+        },
+        {
           "name": "entity.name.type.pspscript",
           "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
         }
@@ -195,7 +218,7 @@
       "patterns": [
         {
           "name": "support.function.builtin.pspscript",
-          "match": "\\b(sprite|draw_subsprite|draw_tilemap|set_camera|get_camera|set_camera_enabled|draw_rect|draw_text|draw_number|clear_screen|save_game|load_game|play_sound|button_pressed|button_held|sin|cos|sqrt|abs|min|max|clamp|lerp|print|texture|sound|font)(?=\\s*\\()"
+          "match": "\\b(sprite|draw_subsprite|draw_tilemap|set_camera|get_camera|set_camera_enabled|draw_rect|draw_text|draw_number|clear_screen|save_game|load_game|play_sound|set_master_volume|stop_all_sounds|button_pressed|button_held|sin|cos|sqrt|abs|min|max|clamp|lerp|print|texture|tilemap|sound|music)(?=\\s*\\()"
         }
       ]
     },
@@ -230,20 +253,40 @@
     "operators": {
       "patterns": [
         {
+          "name": "keyword.operator.fat-arrow.pspscript",
+          "match": "=>"
+        },
+        {
           "name": "keyword.operator.arrow.pspscript",
           "match": "->"
         },
         {
-          "name": "keyword.operator.assignment.pspscript",
-          "match": "(\\+=|-=|\\*=|/=|=)"
+          "name": "keyword.operator.range.pspscript",
+          "match": "\\.\\."
+        },
+        {
+          "name": "keyword.operator.assignment.compound.pspscript",
+          "match": "(<<=|>>=|\\+=|-=|\\*=|/=|&=|\\|=|\\^=)"
         },
         {
           "name": "keyword.operator.comparison.pspscript",
-          "match": "(==|!=|<=|>=|<|>)"
+          "match": "(==|!=|<=|>=)"
         },
         {
           "name": "keyword.operator.logical.pspscript",
           "match": "(&&|\\|\\||!)"
+        },
+        {
+          "name": "keyword.operator.bitwise.pspscript",
+          "match": "(<<|>>|&|\\||\\^|~)"
+        },
+        {
+          "name": "keyword.operator.comparison.pspscript",
+          "match": "(<|>)"
+        },
+        {
+          "name": "keyword.operator.assignment.pspscript",
+          "match": "="
         },
         {
           "name": "keyword.operator.arithmetic.pspscript",

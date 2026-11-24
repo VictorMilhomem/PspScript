@@ -14,27 +14,37 @@ public sealed record ModuleLoadResult(
     bool Success,
     ProgramNode? Program,
     IReadOnlyList<string> LoadedFiles,
-    IReadOnlyList<ModuleLoadError> Errors
+    IReadOnlyList<ModuleLoadError> Errors,
+    IReadOnlySet<string>? LoadedCanonicalPaths = null
 );
 
 public sealed class ModuleLoader
 {
+    private readonly IReadOnlyDictionary<string, string>? _sourceOverrides;
     private readonly HashSet<string> _loadedPaths = new(StringComparer.Ordinal);
     private readonly List<string> _loadedFilesInOrder = [];
     private readonly List<string> _activeStack = [];
     private readonly List<TopDecl> _mergedDeclarations = [];
     private readonly List<ModuleLoadError> _errors = [];
 
-    public static ModuleLoadResult Load(string entryFilePath)
+    private ModuleLoader(IReadOnlyDictionary<string, string>? sourceOverrides = null)
     {
-        var loader = new ModuleLoader();
+        _sourceOverrides = sourceOverrides;
+    }
+
+    public static ModuleLoadResult Load(
+        string entryFilePath,
+        IReadOnlyDictionary<string, string>? sourceOverrides = null)
+    {
+        var loader = new ModuleLoader(sourceOverrides);
         return loader.LoadEntry(entryFilePath);
     }
 
     private ModuleLoadResult LoadEntry(string entryFilePath)
     {
         string fullPath = Path.GetFullPath(entryFilePath);
-        if (!File.Exists(fullPath))
+        bool hasOverride = _sourceOverrides is not null && _sourceOverrides.ContainsKey(fullPath);
+        if (!hasOverride && !File.Exists(fullPath))
         {
             _errors.Add(new ModuleLoadError(entryFilePath, $"Input file not found: '{entryFilePath}'"));
             return new ModuleLoadResult(false, null, _loadedFilesInOrder, _errors);
@@ -44,14 +54,15 @@ public sealed class ModuleLoader
 
         if (_errors.Count > 0)
         {
-            return new ModuleLoadResult(false, null, _loadedFilesInOrder, _errors);
+            return new ModuleLoadResult(false, null, _loadedFilesInOrder, _errors, _loadedPaths);
         }
 
         return new ModuleLoadResult(
             Success: true,
             Program: new ProgramNode(_mergedDeclarations),
             LoadedFiles: _loadedFilesInOrder,
-            Errors: _errors
+            Errors: _errors,
+            LoadedCanonicalPaths: _loadedPaths
         );
     }
 
@@ -79,7 +90,17 @@ public sealed class ModuleLoader
             return;
         }
 
-        if (!File.Exists(canonicalPath))
+        string? source = null;
+        if (_sourceOverrides is not null && _sourceOverrides.TryGetValue(canonicalPath, out var overridden))
+        {
+            source = overridden;
+        }
+        else if (File.Exists(canonicalPath))
+        {
+            source = File.ReadAllText(canonicalPath);
+        }
+
+        if (source is null)
         {
             string contextMsg = requestedBy is not null
                 ? $"Imported module '{displayPath}' not found (resolved to '{canonicalPath}')."
@@ -87,8 +108,6 @@ public sealed class ModuleLoader
             _errors.Add(new ModuleLoadError(requestedBy ?? displayPath, contextMsg));
             return;
         }
-
-        string source = File.ReadAllText(canonicalPath);
         if (!PspParser.TryParse(source, out var parsed, out var parseError) || parsed is null)
         {
             _errors.Add(new ModuleLoadError(
@@ -133,6 +152,10 @@ public sealed class ModuleLoader
             else if (decl is AssetDecl assetDecl)
             {
                 _mergedDeclarations.Add(assetDecl with { SourceDirectory = currentDir });
+            }
+            else if (decl is GameConfigDecl gameDecl)
+            {
+                _mergedDeclarations.Add(gameDecl with { SourceDirectory = currentDir });
             }
             else
             {

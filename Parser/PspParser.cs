@@ -12,12 +12,12 @@ public static class PspParser
 
     private static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
     {
-        "import", "game", "asset", "message", "struct", "actor", "state",
+        "import", "game", "asset", "message", "struct", "enum", "actor", "state",
         "global", "level", "temp", "var", "fn",
         "init", "update", "draw", "exit", "on",
         "int", "u8", "u16", "u32", "f32", "bool", "void",
         "vec2", "vec3", "rect", "color", "timer", "ref",
-        "if", "else", "while", "each", "in", "return",
+        "if", "else", "match", "for", "each", "in", "break", "return",
         "send", "spawn", "destroy", "goto",
         "true", "false", "null", "self"
     };
@@ -117,20 +117,37 @@ public static class PspParser
             });
 
         // Numbers: float (10.5), time (0.5s / 250ms), or int (42)
-        var numericExpr = Terms.Decimal(NumberOptions.Float)
+        // Fractional '.' is only consumed when followed by a digit so range literals like `0..10` stay intact.
+        var digits = Literals.Pattern(static c => char.IsAsciiDigit(c), minSize: 1);
+        var fracPartParser = Literals.Char('.').SkipAnd(digits)
+            .ThenElse<string?>(static (context, s) => s.ToString(), null);
+        var numericExpr = SkipWhiteSpace(digits)
+            .And(fracPartParser)
             .And(Literals.Text("ms").Or(Literals.Text("s")).Else(string.Empty))
             .Then<Expr>(static (context, x) =>
             {
-                decimal raw = x.Item1;
-                string suffix = x.Item2;
+                string intPart = x.Item1.ToString();
+                string? fracPart = x.Item2;
+                string suffix = x.Item3;
 
-                if (suffix == "ms") return new TimeLiteralExpr((float)(raw / 1000m));
-                if (suffix == "s")  return new TimeLiteralExpr((float)raw);
+                if (suffix == "ms")
+                {
+                    float val = float.Parse(fracPart is not null ? $"{intPart}.{fracPart}" : intPart, CultureInfo.InvariantCulture);
+                    return new TimeLiteralExpr(val / 1000.0f);
+                }
 
-                // Check if raw decimal was written without a decimal point (Scale == 0) or as float
-                return raw.Scale == 0
-                    ? new IntLiteralExpr((int)raw)
-                    : new FloatLiteralExpr((float)raw);
+                if (suffix == "s")
+                {
+                    float val = float.Parse(fracPart is not null ? $"{intPart}.{fracPart}" : intPart, CultureInfo.InvariantCulture);
+                    return new TimeLiteralExpr(val);
+                }
+
+                if (fracPart is not null)
+                {
+                    return new FloatLiteralExpr(float.Parse($"{intPart}.{fracPart}", CultureInfo.InvariantCulture));
+                }
+
+                return new IntLiteralExpr(int.Parse(intPart, CultureInfo.InvariantCulture));
             });
 
         var boolExpr = Keyword("true").Then<Expr>(static (context, _) => new BooleanLiteralExpr(true))
@@ -169,7 +186,8 @@ public static class PspParser
             )
             .Then<Func<Expr, Expr>>(static (context, args) => target => new CallExpr(target, args));
 
-        var fieldSuffix = Terms.Char('.')
+        var fieldSuffix = Not(Terms.Text(".."))
+            .SkipAnd(Terms.Char('.'))
             .SkipAnd(rawIdentifier.ElseError("Expected field or method name after '.'"))
             .Then<Func<Expr, Expr>>(static (context, field) => target => new FieldAccessExpr(target, field));
 
@@ -192,15 +210,16 @@ public static class PspParser
                 return current;
             });
 
-        // Unary operators: `-x`, `!flag`
+        // Unary operators: `-x`, `!flag`, `~mask`
         var unaryExpr = Deferred<Expr>();
         unaryExpr.Parser = OneOf(
             Terms.Char('-').SkipAnd(unaryExpr).Then<Expr>(static (context, operand) => new UnaryExpr(UnaryOp.Negate, operand)),
             Terms.Char('!').SkipAnd(unaryExpr).Then<Expr>(static (context, operand) => new UnaryExpr(UnaryOp.Not, operand)),
+            Terms.Char('~').SkipAnd(unaryExpr).Then<Expr>(static (context, operand) => new UnaryExpr(UnaryOp.BitNot, operand)),
             postfixExpr
         );
 
-        // Precedence climbing (highest to lowest)
+        // Precedence climbing (highest to lowest, matching C99)
         var factorExpr = unaryExpr.LeftAssociative(
             (Terms.Text("*"), static (context, a, b) => new BinaryExpr(a, BinaryOp.Mul, b)),
             (Terms.Text("/"), static (context, a, b) => new BinaryExpr(a, BinaryOp.Div, b)),
@@ -212,7 +231,12 @@ public static class PspParser
             (Terms.Text("-"), static (context, a, b) => new BinaryExpr(a, BinaryOp.Sub, b))
         );
 
-        var comparisonExpr = termExpr.LeftAssociative(
+        var shiftExpr = termExpr.LeftAssociative(
+            (Terms.Text("<<"), static (context, a, b) => new BinaryExpr(a, BinaryOp.ShiftLeft, b)),
+            (Terms.Text(">>"), static (context, a, b) => new BinaryExpr(a, BinaryOp.ShiftRight, b))
+        );
+
+        var comparisonExpr = shiftExpr.LeftAssociative(
             (Terms.Text("<="), static (context, a, b) => new BinaryExpr(a, BinaryOp.LessEqual, b)),
             (Terms.Text(">="), static (context, a, b) => new BinaryExpr(a, BinaryOp.GreaterEqual, b)),
             (Terms.Text("<"),  static (context, a, b) => new BinaryExpr(a, BinaryOp.Less, b)),
@@ -224,7 +248,19 @@ public static class PspParser
             (Terms.Text("!="), static (context, a, b) => new BinaryExpr(a, BinaryOp.NotEqual, b))
         );
 
-        var logicAndExpr = equalityExpr.LeftAssociative(
+        var bitAndExpr = equalityExpr.LeftAssociative(
+            (Not(Terms.Text("&&")).SkipAnd(Terms.Text("&")), static (context, a, b) => new BinaryExpr(a, BinaryOp.BitAnd, b))
+        );
+
+        var bitXorExpr = bitAndExpr.LeftAssociative(
+            (Terms.Text("^"), static (context, a, b) => new BinaryExpr(a, BinaryOp.BitXor, b))
+        );
+
+        var bitOrExpr = bitXorExpr.LeftAssociative(
+            (Not(Terms.Text("||")).SkipAnd(Terms.Text("|")), static (context, a, b) => new BinaryExpr(a, BinaryOp.BitOr, b))
+        );
+
+        var logicAndExpr = bitOrExpr.LeftAssociative(
             (Terms.Text("&&"), static (context, a, b) => new BinaryExpr(a, BinaryOp.LogicalAnd, b))
         );
 
@@ -321,11 +357,51 @@ public static class PspParser
             )
             .Then(static (context, x) => new IfStmt(x.Item1, x.Item2, x.Item3));
 
-        // while cond { ... }
-        var whileStmt = Keyword("while")
+        // match scrutinee { Pattern => stmt_or_block, _ => ... }
+        var wildcardPattern = Keyword("_")
+            .Then<MatchPattern>(static (context, _) => new WildcardPattern());
+
+        var enumVariantPattern = identifier
+            .AndSkip(Terms.Char('.'))
+            .And(identifier.ElseError("Expected enum variant name after '.'"))
+            .Then<MatchPattern>(static (context, x) => new EnumVariantPattern(x.Item1, x.Item2));
+
+        var signedIntPattern = Terms.Char('-').ThenElse(static (_, _) => true, false)
+            .And(intLiteral)
+            .Then<MatchPattern>(static (context, x) => new IntLiteralPattern(x.Item1 ? -x.Item2 : x.Item2));
+
+        var matchPattern = OneOf(wildcardPattern, enumVariantPattern, signedIntPattern);
+
+        var matchArm = matchPattern
+            .AndSkip(Terms.Text("=>").ElseError("Expected '=>' after match pattern"))
+            .And(OneOf(blockStmt.Then<Stmt>(static (context, b) => b), stmt))
+            .AndSkip(ZeroOrOne(Terms.Char(',')))
+            .Then(static (context, x) => new MatchArm(x.Item1, x.Item2));
+
+        var matchStmt = Keyword("match")
+            .SkipAnd(expr)
+            .And(Between(
+                Terms.Char('{'),
+                ZeroOrMany(matchArm),
+                Terms.Char('}').ElseError("Expected '}' closing match statement")
+            ))
+            .Then<Stmt>(static (context, x) => new MatchStmt(x.Item1, x.Item2));
+
+        // for i in start..end { ... }
+        var forRangeStmt = Keyword("for")
+            .SkipAnd(identifier)
+            .AndSkip(Keyword("in"))
+            .And(expr)
+            .AndSkip(Terms.Text("..").ElseError("Expected '..' in range 'for' loop"))
+            .And(expr)
+            .And(blockStmt)
+            .Then<Stmt>(static (context, x) => new ForRangeStmt(x.Item1, x.Item2, x.Item3, x.Item4));
+
+        // for cond { ... }
+        var forCondStmt = Keyword("for")
             .SkipAnd(expr)
             .And(blockStmt)
-            .Then<Stmt>(static (context, x) => new WhileStmt(x.Item1, x.Item2));
+            .Then<Stmt>(static (context, x) => new ForStmt(x.Item1, x.Item2));
 
         // each b in Bullet { ... }
         var forEachStmt = Keyword("each")
@@ -334,6 +410,10 @@ public static class PspParser
             .And(identifier.ElseError("Expected actor pool name after 'in'"))
             .And(blockStmt)
             .Then<Stmt>(static (context, x) => new ForEachStmt(x.Item1, x.Item2, x.Item3));
+
+        // break
+        var breakStmt = Keyword("break")
+            .Then<Stmt>(static (context, _) => new BreakStmt());
 
         // return expr?
         var returnStmt = Keyword("return")
@@ -388,10 +468,15 @@ public static class PspParser
 
         // Assignment (`target += val`) or standalone expression (`sprite(...)`)
         var assignOp = OneOf(
+            Terms.Text("<<=").Then(static (context, _) => AssignOp.ShiftLeftAssign),
+            Terms.Text(">>=").Then(static (context, _) => AssignOp.ShiftRightAssign),
             Terms.Text("+=").Then(static (context, _) => AssignOp.AddAssign),
             Terms.Text("-=").Then(static (context, _) => AssignOp.SubAssign),
             Terms.Text("*=").Then(static (context, _) => AssignOp.MulAssign),
             Terms.Text("/=").Then(static (context, _) => AssignOp.DivAssign),
+            Terms.Text("&=").Then(static (context, _) => AssignOp.BitAndAssign),
+            Terms.Text("|=").Then(static (context, _) => AssignOp.BitOrAssign),
+            Terms.Text("^=").Then(static (context, _) => AssignOp.BitXorAssign),
             Terms.Text("=").Then(static (context, _) => AssignOp.Assign)
         );
 
@@ -405,8 +490,11 @@ public static class PspParser
             spawnWithBinding,
             localVarStmt,
             ifStmt.Then<Stmt>(static (context, i) => i),
-            whileStmt,
+            matchStmt,
+            forRangeStmt,
+            forCondStmt,
             forEachStmt,
+            breakStmt,
             returnStmt,
             sendStmt,
             spawnStandalone,
@@ -468,9 +556,13 @@ public static class PspParser
                 return new IntConfigValue((int)val);
             });
 
+        var boolConfigValue = Keyword("true").Then<ConfigValue>(static (context, _) => new BoolConfigValue(true))
+            .Or(Keyword("false").Then<ConfigValue>(static (context, _) => new BoolConfigValue(false)));
+
         var configValue = OneOf(
             stringLiteral.Then<ConfigValue>(static (context, s) => new StringConfigValue(s)),
             sizeOrIntConfig,
+            boolConfigValue,
             rawIdentifier.Then<ConfigValue>(static (context, id) => new IdentConfigValue(id))
         );
 
@@ -527,6 +619,16 @@ public static class PspParser
                 Terms.Char('}').ElseError("Expected '}' closing struct declaration")
             ))
             .Then<TopDecl>(static (context, x) => new StructDecl(x.Item1, x.Item2));
+
+        // Enum: enum Season { Spring, Summer, Fall, Winter }
+        var enumDecl = Keyword("enum")
+            .SkipAnd(identifier.ElseError("Expected enum name after 'enum'"))
+            .And(Between(
+                Terms.Char('{'),
+                Separated(Terms.Char(','), identifier, min: 0).AndSkip(ZeroOrOne(Terms.Char(','))),
+                Terms.Char('}').ElseError("Expected '}' closing enum declaration")
+            ))
+            .Then<TopDecl>(static (context, x) => new EnumDecl(x.Item1, x.Item2));
 
         // Shared member parser for Actor and State blocks
         var containerMember = OneOf(
@@ -613,6 +715,7 @@ public static class PspParser
             assetDecl,
             messageDecl,
             structDecl,
+            enumDecl,
             actorDecl,
             stateDecl,
             globalVarDecl,

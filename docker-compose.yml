@@ -5,6 +5,12 @@ services:
     working_dir: /src
     environment:
       PSP_EBOOT_TITLE: ${PSP_EBOOT_TITLE:-PSPScript Game}
+      PSP_GAME_ID: ${PSP_GAME_ID:-PSPS00001}
+      PSP_APP_VER: ${PSP_APP_VER:-01.00}
+      PSP_MEMSIZE: ${PSP_MEMSIZE:-1}
+      PSP_EBOOT_ICON: ${PSP_EBOOT_ICON:-NULL}
+      PSP_EBOOT_PIC1: ${PSP_EBOOT_PIC1:-NULL}
+      PSP_EBOOT_UNKPNG: ${PSP_EBOOT_UNKPNG:-NULL}
     volumes:
       - ./:/src:Z
     command: >

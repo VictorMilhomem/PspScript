@@ -1,12 +1,19 @@
 {
   "name": "pspscript",
   "displayName": "PSPScript",
-  "description": "Syntax highlighting, language configuration, and snippets for PSPScript (.psps) — PlayStation Portable homebrew scripting language.",
-  "version": "0.1.0",
+  "description": "Syntax highlighting, Language Server (LSP) diagnostics & autocomplete, and snippets for PSPScript (.psps) — PlayStation Portable homebrew scripting language.",
+  "version": "0.2.0",
   "publisher": "pspscript",
   "icon": "images/icon.png",
+  "main": "./extension.js",
+  "activationEvents": [
+    "onLanguage:pspscript"
+  ],
   "engines": {
     "vscode": "^1.75.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
   },
   "categories": [
     "Programming Languages",
@@ -51,6 +58,16 @@
         "language": "pspscript",
         "path": "./snippets/pspscript.json"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "PSPScript",
+      "properties": {
+        "pspscript.serverPath": {
+          "type": "string",
+          "default": "",
+          "description": "Optional path to a compiled PspScript binary or PspScript.dll for the PSPScript Language Server (--lsp). Leave empty to auto-detect from the repository build output."
+        }
+      }
+    }
   }
 }

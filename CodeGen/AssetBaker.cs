@@ -27,10 +27,10 @@ internal static class AssetBaker
 {
     private static readonly byte[] PngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
 
-    public static BakedTextureAsset BakeTexture(AssetSymbol asset, string? baseDirectory)
+    public static BakedTextureAsset BakeTexture(AssetSymbol asset, string? baseDirectory, out string? resolvedPath)
     {
         BakedPixelFormat format = ResolveRequestedFormat(asset.Declaration.Options);
-        string? resolvedPath = ResolveAssetPath(asset.FilePath, asset.Declaration.SourceDirectory, baseDirectory);
+        resolvedPath = ResolveAssetPath(asset.FilePath, asset.Declaration.SourceDirectory, baseDirectory);
 
         if (resolvedPath is not null && File.Exists(resolvedPath))
         {
@@ -51,7 +51,28 @@ internal static class AssetBaker
         return CreatePlaceholder(asset.Name, format);
     }
 
-    private static BakedPixelFormat ResolveRequestedFormat(IReadOnlyList<NamedArg> options)
+    public static BakedTextureAsset BakeTextureFromPath(string assetName, string? resolvedPath, BakedPixelFormat format)
+    {
+        if (resolvedPath is not null && File.Exists(resolvedPath))
+        {
+            try
+            {
+                return DecodePng(assetName, resolvedPath, format);
+            }
+            catch (Exception ex)
+            {
+                Console.Error.WriteLine($"Warning: Failed to bake PNG '{resolvedPath}' for '{assetName}': {ex.Message}. Falling back to 8x8 placeholder.");
+            }
+        }
+        else
+        {
+            Console.Error.WriteLine($"Warning: Tileset PNG '{resolvedPath ?? "<null>"}' not found for '{assetName}'. Using 8x8 placeholder.");
+        }
+
+        return CreatePlaceholder(assetName, format);
+    }
+
+    internal static BakedPixelFormat ResolveRequestedFormat(IReadOnlyList<NamedArg> options)
     {
         foreach (var opt in options)
         {
@@ -75,7 +96,7 @@ internal static class AssetBaker
         return BakedPixelFormat.Rgba4444;
     }
 
-    private static string? ResolveAssetPath(string rawPath, string? declaringDirectory, string? baseDirectory)
+    internal static string? ResolveAssetPath(string rawPath, string? declaringDirectory, string? baseDirectory)
     {
         if (Path.IsPathRooted(rawPath) && File.Exists(rawPath))
             return rawPath;

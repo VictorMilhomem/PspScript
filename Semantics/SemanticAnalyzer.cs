@@ -77,12 +77,16 @@ public sealed class SemanticAnalyzer
                         break;
 
                     var assetType = new AssetType(asset.AssetKind);
+                    bool isMutable = asset.Options.Any(static opt =>
+                        string.Equals(opt.Name, "mutable", StringComparison.OrdinalIgnoreCase) &&
+                        opt.Value is BooleanLiteralExpr { Value: true });
                     _symbols.Assets[asset.Name] = new AssetSymbol(
                         asset.Name,
                         asset.AssetKind,
                         asset.FilePath,
                         assetType,
-                        asset
+                        asset,
+                        isMutable
                     );
                     _model.RecordType(asset, assetType);
                     break;
@@ -108,6 +112,39 @@ public sealed class SemanticAnalyzer
                         new Dictionary<string, FieldSymbol>(StringComparer.Ordinal),
                         st
                     );
+                    break;
+
+                case EnumDecl enumDecl:
+                    if (!RegisterUniqueTopLevel(enumDecl.Name, enumDecl))
+                        break;
+
+                    if (enumDecl.Variants.Count == 0)
+                    {
+                        ReportError($"Enum '{enumDecl.Name}' must declare at least one variant.", enumDecl.Span);
+                    }
+
+                    var uniqueVariants = new List<string>(enumDecl.Variants.Count);
+                    var seenVariants = new HashSet<string>(StringComparer.Ordinal);
+                    foreach (var variant in enumDecl.Variants)
+                    {
+                        if (!seenVariants.Add(variant))
+                        {
+                            ReportError($"Duplicate variant '{variant}' in enum '{enumDecl.Name}'.", enumDecl.Span);
+                        }
+                        else
+                        {
+                            uniqueVariants.Add(variant);
+                        }
+                    }
+
+                    var enumType = new EnumType(enumDecl.Name);
+                    _symbols.Enums[enumDecl.Name] = new EnumSymbol(
+                        enumDecl.Name,
+                        enumType,
+                        uniqueVariants,
+                        enumDecl
+                    );
+                    _model.RecordType(enumDecl, enumType);
                     break;
 
                 case ActorDecl actor:
@@ -150,28 +187,140 @@ public sealed class SemanticAnalyzer
         }
     }
 
+    private static readonly string[] ValidGameConfigKeys =
+    [
+        "ram_budget", "fps", "entry", "id", "version",
+        "extra_ram", "window_scale", "icon", "background", "overlay"
+    ];
+
     private void ExtractGameConfigSettings(GameConfigDecl gameConfig)
     {
-        if (gameConfig.Settings.TryGetValue("ram_budget", out var ramSetting))
+        foreach (var (key, value) in gameConfig.Settings)
         {
-            switch (ramSetting)
+            switch (key)
             {
-                case SizeConfigValue sizeVal:
-                    if (sizeVal.Bytes <= 0)
-                        ReportError("'ram_budget' must be greater than 0 bytes.", gameConfig.Span);
-                    else
-                        _symbols.ConfiguredRamBudgetBytes = sizeVal.Bytes;
+                case "ram_budget":
+                    switch (value)
+                    {
+                        case SizeConfigValue sizeVal:
+                            if (sizeVal.Bytes <= 0)
+                                ReportError("'ram_budget' must be greater than 0 bytes.", gameConfig.Span);
+                            else
+                                _symbols.ConfiguredRamBudgetBytes = sizeVal.Bytes;
+                            break;
+
+                        case IntConfigValue intVal:
+                            if (intVal.Value <= 0)
+                                ReportError("'ram_budget' must be greater than 0.", gameConfig.Span);
+                            else
+                                _symbols.ConfiguredRamBudgetBytes = intVal.Value;
+                            break;
+
+                        default:
+                            ReportError("'ram_budget' in game config must be a size literal (e.g., 16MB) or integer.", gameConfig.Span);
+                            break;
+                    }
                     break;
 
-                case IntConfigValue intVal:
-                    if (intVal.Value <= 0)
-                        ReportError("'ram_budget' must be greater than 0.", gameConfig.Span);
+                case "fps":
+                    if (value is IntConfigValue fpsVal && fpsVal.Value > 0)
+                    {
+                        // Validated positive target FPS
+                    }
                     else
-                        _symbols.ConfiguredRamBudgetBytes = intVal.Value;
+                    {
+                        ReportError("'fps' in game config must be a positive integer (e.g., 60).", gameConfig.Span);
+                    }
+                    break;
+
+                case "entry":
+                    // Validated in ResolveGameEntryState() after all states are collected
+                    break;
+
+                case "id":
+                    if (value is StringConfigValue idVal &&
+                        idVal.Value.Length is >= 1 and <= 9 &&
+                        idVal.Value.All(static c => (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')))
+                    {
+                        _symbols.GameId = idVal.Value;
+                    }
+                    else
+                    {
+                        ReportError("'id' in game config must be a 1-9 character uppercase alphanumeric string (e.g., \"PSPS00001\").", gameConfig.Span);
+                    }
+                    break;
+
+                case "version":
+                    if (value is StringConfigValue verVal && !string.IsNullOrWhiteSpace(verVal.Value))
+                    {
+                        _symbols.GameVersion = verVal.Value.Trim();
+                    }
+                    else
+                    {
+                        ReportError("'version' in game config must be a non-empty string (e.g., \"01.00\").", gameConfig.Span);
+                    }
+                    break;
+
+                case "extra_ram":
+                    if (value is BoolConfigValue extraRamVal)
+                    {
+                        _symbols.ExtraRam = extraRamVal.Value;
+                    }
+                    else
+                    {
+                        ReportError("'extra_ram' in game config must be a boolean ('true' or 'false').", gameConfig.Span);
+                    }
+                    break;
+
+                case "window_scale":
+                    if (value is IntConfigValue scaleVal && scaleVal.Value is >= 1 and <= 4)
+                    {
+                        _symbols.WindowScale = scaleVal.Value;
+                    }
+                    else
+                    {
+                        ReportError("'window_scale' in game config must be an integer between 1 and 4.", gameConfig.Span);
+                    }
+                    break;
+
+                case "icon":
+                    if (value is StringConfigValue iconVal && !string.IsNullOrWhiteSpace(iconVal.Value))
+                    {
+                        _symbols.IconPath = iconVal.Value.Trim();
+                    }
+                    else
+                    {
+                        ReportError("'icon' in game config must be a non-empty PNG file path string.", gameConfig.Span);
+                    }
+                    break;
+
+                case "background":
+                    if (value is StringConfigValue bgVal && !string.IsNullOrWhiteSpace(bgVal.Value))
+                    {
+                        _symbols.BackgroundPath = bgVal.Value.Trim();
+                    }
+                    else
+                    {
+                        ReportError("'background' in game config must be a non-empty PNG file path string.", gameConfig.Span);
+                    }
+                    break;
+
+                case "overlay":
+                    if (value is StringConfigValue ovVal && !string.IsNullOrWhiteSpace(ovVal.Value))
+                    {
+                        _symbols.OverlayPath = ovVal.Value.Trim();
+                    }
+                    else
+                    {
+                        ReportError("'overlay' in game config must be a non-empty PNG file path string.", gameConfig.Span);
+                    }
                     break;
 
                 default:
-                    ReportError("'ram_budget' in game config must be a size literal (e.g., 16MB) or integer.", gameConfig.Span);
+                    ReportError(
+                        $"Unknown game config key '{key}'. Valid keys: {string.Join(", ", ValidGameConfigKeys)}.",
+                        gameConfig.Span
+                    );
                     break;
             }
         }
@@ -468,6 +617,9 @@ public sealed class SemanticAnalyzer
         if (_symbols.Structs.TryGetValue(named.Name, out var structSym))
             return structSym.Type;
 
+        if (_symbols.Enums.TryGetValue(named.Name, out var enumSym))
+            return enumSym.Type;
+
         if (_symbols.Actors.ContainsKey(named.Name))
         {
             ReportError(
@@ -568,15 +720,7 @@ public sealed class SemanticAnalyzer
             switch (decl)
             {
                 case AssetDecl asset:
-                    foreach (var opt in asset.Options)
-                    {
-                        ResolvedType optType = opt.Value is IdentifierExpr optId &&
-                                               !_symbols.Globals.ContainsKey(optId.Name) &&
-                                               !_symbols.Assets.ContainsKey(optId.Name)
-                            ? _model.RecordType(opt.Value, ResolvedType.String)
-                            : ResolveExpr(opt.Value, rootScope, expectedType: null);
-                        _model.RecordType(opt, optType);
-                    }
+                    ValidateAssetOptions(asset, rootScope);
                     break;
 
                 case GlobalVarDecl gvar when _symbols.Globals.TryGetValue(gvar.Name, out var gvarSym):
@@ -607,6 +751,103 @@ public sealed class SemanticAnalyzer
                     ValidateFunctionBody(fn, fnSym, rootScope);
                     break;
             }
+        }
+    }
+
+    private void ValidateAssetOptions(AssetDecl asset, LexicalScope rootScope)
+    {
+        foreach (var opt in asset.Options)
+        {
+            if (asset.AssetKind is "sound" or "music" &&
+                string.Equals(opt.Name, "rate", StringComparison.OrdinalIgnoreCase))
+            {
+                if (opt.Value is IntLiteralExpr { Value: 44100 or 22050 })
+                {
+                    _model.RecordType(opt.Value, ResolvedType.Int);
+                    _model.RecordType(opt, ResolvedType.Int);
+                }
+                else
+                {
+                    ReportError(
+                        $"Audio asset '{asset.Name}' option 'rate' must be 44100 or 22050.",
+                        opt.Span
+                    );
+                    _model.RecordType(opt, ResolvedType.Error);
+                }
+                continue;
+            }
+
+            if (string.Equals(asset.AssetKind, "tilemap", StringComparison.Ordinal))
+            {
+                if (string.Equals(opt.Name, "tileset", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (opt.Value is IdentifierExpr tsId &&
+                        _symbols.Assets.TryGetValue(tsId.Name, out var tsSym))
+                    {
+                        if (!string.Equals(tsSym.AssetKind, "texture", StringComparison.Ordinal))
+                        {
+                            ReportError(
+                                $"Tilemap '{asset.Name}' option 'tileset' must reference a 'texture' asset, got '{tsSym.AssetKind}'.",
+                                opt.Span
+                            );
+                        }
+                        _model.RecordType(opt.Value, tsSym.Type);
+                        _model.RecordType(opt, tsSym.Type);
+                    }
+                    else
+                    {
+                        ReportError(
+                            $"Tilemap '{asset.Name}' option 'tileset' must reference a declared 'texture' asset.",
+                            opt.Span
+                        );
+                        _model.RecordType(opt, ResolvedType.Error);
+                    }
+                    continue;
+                }
+
+                if (string.Equals(opt.Name, "mutable", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (opt.Value is not BooleanLiteralExpr)
+                    {
+                        ReportError(
+                            $"Tilemap '{asset.Name}' option 'mutable' must be a boolean literal ('true' or 'false').",
+                            opt.Span
+                        );
+                        _model.RecordType(opt, ResolvedType.Error);
+                    }
+                    else
+                    {
+                        _model.RecordType(opt.Value, ResolvedType.Bool);
+                        _model.RecordType(opt, ResolvedType.Bool);
+                    }
+                    continue;
+                }
+
+                if (string.Equals(opt.Name, "collision_layer", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (opt.Value is not StringLiteralExpr)
+                    {
+                        ReportError(
+                            $"Tilemap '{asset.Name}' option 'collision_layer' must be a string literal.",
+                            opt.Span
+                        );
+                        _model.RecordType(opt, ResolvedType.Error);
+                    }
+                    else
+                    {
+                        _model.RecordType(opt.Value, ResolvedType.String);
+                        _model.RecordType(opt, ResolvedType.String);
+                    }
+                    continue;
+                }
+            }
+
+            ResolvedType optType = opt.Value is IdentifierExpr optId &&
+                                   !_symbols.Globals.ContainsKey(optId.Name) &&
+                                   !_symbols.Assets.ContainsKey(optId.Name)
+                ? _model.RecordType(opt.Value, ResolvedType.String)
+                : ResolveExpr(opt.Value, rootScope, expectedType: null);
+            _model.RecordType(opt, optType);
         }
     }
 
@@ -792,6 +1033,8 @@ public sealed class SemanticAnalyzer
         BlockStmt blk => BlockDefinitelyReturns(blk),
         IfStmt { ElseBranch: not null } ifStmt =>
             BlockDefinitelyReturns(ifStmt.ThenBranch) && StmtDefinitelyReturns(ifStmt.ElseBranch),
+        MatchStmt { Arms.Count: > 0 } matchStmt =>
+            matchStmt.Arms.All(static arm => StmtDefinitelyReturns(arm.Body)),
         _ => false
     };
 
@@ -830,12 +1073,24 @@ public sealed class SemanticAnalyzer
                 ValidateIfStmt(ifStmt, scope);
                 break;
 
-            case WhileStmt whileStmt:
-                ValidateWhileStmt(whileStmt, scope);
+            case MatchStmt matchStmt:
+                ValidateMatchStmt(matchStmt, scope);
+                break;
+
+            case ForStmt forStmt:
+                ValidateForStmt(forStmt, scope);
+                break;
+
+            case ForRangeStmt forRangeStmt:
+                ValidateForRangeStmt(forRangeStmt, scope);
                 break;
 
             case ForEachStmt forEachStmt:
                 ValidateForEachStmt(forEachStmt, scope);
+                break;
+
+            case BreakStmt breakStmt:
+                ValidateBreakStmt(breakStmt, scope);
                 break;
 
             case ReturnStmt returnStmt:
@@ -962,6 +1217,16 @@ public sealed class SemanticAnalyzer
         }
 
         var targetType = ResolveExpr(assign.Target, scope, expectedType: null);
+        if (assign.Target is FieldAccessExpr { Target: IdentifierExpr enumId } enumField &&
+            _symbols.Enums.ContainsKey(enumId.Name))
+        {
+            ReportError($"Cannot assign to enum variant '{enumId.Name}.{enumField.FieldName}'.", assign.Span);
+        }
+        else if (IsReadOnlyComputedProperty(assign.Target, out string? readOnlyProp))
+        {
+            ReportError($"Cannot assign to read-only computed property '{readOnlyProp}'.", assign.Span);
+        }
+
         var valueType = ResolveExpr(assign.Value, scope, expectedType: targetType);
 
         if (targetType.IsError || valueType.IsError)
@@ -976,6 +1241,17 @@ public sealed class SemanticAnalyzer
             {
                 ReportError(
                     $"Cannot assign value of type '{valueType}' to target of type '{targetType}'.",
+                    assign.Span
+                );
+            }
+        }
+        else if (assign.Operator is AssignOp.BitAndAssign or AssignOp.BitOrAssign or AssignOp.BitXorAssign
+                                 or AssignOp.ShiftLeftAssign or AssignOp.ShiftRightAssign)
+        {
+            if (!targetType.IsInteger || !valueType.IsInteger)
+            {
+                ReportError(
+                    $"Operator '{FormatAssignOp(assign.Operator)}' requires integer operands, got '{targetType}' and '{valueType}'.",
                     assign.Span
                 );
             }
@@ -1021,16 +1297,238 @@ public sealed class SemanticAnalyzer
         _model.RecordType(ifStmt, ResolvedType.Void);
     }
 
-    private void ValidateWhileStmt(WhileStmt whileStmt, LexicalScope scope)
+    private void ValidateMatchStmt(MatchStmt matchStmt, LexicalScope scope)
     {
-        var condType = ResolveExpr(whileStmt.Condition, scope, expectedType: ResolvedType.Bool);
-        if (!condType.IsError && condType != ResolvedType.Bool)
+        var scrutineeType = ResolveExpr(matchStmt.Scrutinee, scope, expectedType: null);
+        _model.RecordType(matchStmt, ResolvedType.Void);
+
+        if (matchStmt.Arms.Count == 0)
         {
-            ReportError($"'while' condition must evaluate to 'bool', got '{condType}'.", whileStmt.Span);
+            ReportError("'match' statement must have at least one arm.", matchStmt.Span);
+            return;
         }
 
-        ValidateBlockStmt(whileStmt.Body, scope, createChildScope: true);
-        _model.RecordType(whileStmt, ResolvedType.Void);
+        if (scrutineeType.IsError)
+        {
+            foreach (var arm in matchStmt.Arms)
+            {
+                ValidateMatchArmBody(arm.Body, scope);
+            }
+            return;
+        }
+
+        if (scrutineeType is EnumType enumType && _symbols.Enums.TryGetValue(enumType.Name, out var enumSym))
+        {
+            var coveredVariants = new HashSet<string>(StringComparer.Ordinal);
+            bool hasWildcard = false;
+
+            foreach (var arm in matchStmt.Arms)
+            {
+                if (hasWildcard)
+                {
+                    ReportError("Unreachable 'match' arm after wildcard '_'.", arm.Span);
+                }
+
+                switch (arm.Pattern)
+                {
+                    case WildcardPattern:
+                        if (hasWildcard)
+                        {
+                            ReportError("Duplicate wildcard '_' arm in 'match' statement.", arm.Span);
+                        }
+                        hasWildcard = true;
+                        break;
+
+                    case EnumVariantPattern variantPat:
+                        if (!string.Equals(variantPat.EnumName, enumSym.Name, StringComparison.Ordinal))
+                        {
+                            ReportError(
+                                $"Match arm pattern '{variantPat.EnumName}.{variantPat.VariantName}' does not match scrutinee enum type '{enumSym.Name}'.",
+                                arm.Span
+                            );
+                        }
+                        else if (!enumSym.Variants.Contains(variantPat.VariantName))
+                        {
+                            ReportError(
+                                $"Enum '{enumSym.Name}' does not contain a variant named '{variantPat.VariantName}'.",
+                                arm.Span
+                            );
+                        }
+                        else if (!coveredVariants.Add(variantPat.VariantName))
+                        {
+                            ReportError(
+                                $"Duplicate match arm for '{enumSym.Name}.{variantPat.VariantName}'.",
+                                arm.Span
+                            );
+                        }
+                        break;
+
+                    case IntLiteralPattern intPat:
+                        ReportError(
+                            $"Cannot match integer literal '{intPat.Value}' against enum type '{enumSym.Name}'.",
+                            arm.Span
+                        );
+                        break;
+                }
+
+                ValidateMatchArmBody(arm.Body, scope);
+            }
+
+            if (!hasWildcard)
+            {
+                var missing = enumSym.Variants.Where(v => !coveredVariants.Contains(v)).ToList();
+                if (missing.Count > 0)
+                {
+                    string missingList = string.Join(", ", missing.Select(static v => $"'{v}'"));
+                    ReportError(
+                        $"Non-exhaustive match on '{enumSym.Name}': missing cases {missingList}.",
+                        matchStmt.Span
+                    );
+                }
+            }
+        }
+        else if (scrutineeType.IsInteger)
+        {
+            var coveredInts = new HashSet<int>();
+            bool hasWildcard = false;
+
+            foreach (var arm in matchStmt.Arms)
+            {
+                if (hasWildcard)
+                {
+                    ReportError("Unreachable 'match' arm after wildcard '_'.", arm.Span);
+                }
+
+                switch (arm.Pattern)
+                {
+                    case WildcardPattern:
+                        if (hasWildcard)
+                        {
+                            ReportError("Duplicate wildcard '_' arm in 'match' statement.", arm.Span);
+                        }
+                        hasWildcard = true;
+                        break;
+
+                    case IntLiteralPattern intPat:
+                        if (!coveredInts.Add(intPat.Value))
+                        {
+                            ReportError(
+                                $"Duplicate match arm for integer literal '{intPat.Value}'.",
+                                arm.Span
+                            );
+                        }
+                        break;
+
+                    case EnumVariantPattern variantPat:
+                        ReportError(
+                            $"Cannot match enum variant '{variantPat.EnumName}.{variantPat.VariantName}' against integer type '{scrutineeType}'.",
+                            arm.Span
+                        );
+                        break;
+                }
+
+                ValidateMatchArmBody(arm.Body, scope);
+            }
+
+            if (!hasWildcard)
+            {
+                ReportError(
+                    $"Non-exhaustive match on integer type '{scrutineeType}': a wildcard '_' arm is required.",
+                    matchStmt.Span
+                );
+            }
+        }
+        else
+        {
+            ReportError(
+                $"'match' scrutinee must be an enum or integer type, got '{scrutineeType}'.",
+                matchStmt.Scrutinee.Span
+            );
+
+            foreach (var arm in matchStmt.Arms)
+            {
+                ValidateMatchArmBody(arm.Body, scope);
+            }
+        }
+    }
+
+    private void ValidateMatchArmBody(Stmt body, LexicalScope parentScope)
+    {
+        var armScope = parentScope.CreateChild(isInsideLoop: false);
+        if (body is BlockStmt block)
+        {
+            ValidateBlockStmt(block, armScope, createChildScope: false);
+        }
+        else
+        {
+            ValidateStmt(body, armScope);
+        }
+    }
+
+    private bool IsReadOnlyComputedProperty(Expr target, out string? propertyName)
+    {
+        Expr? current = target;
+        while (current is FieldAccessExpr fieldAccess)
+        {
+            var ownerType = _model.GetTypeOrDefault(fieldAccess.Target);
+            if (ownerType == ResolvedType.Rect && fieldAccess.FieldName == "center")
+            {
+                propertyName = "rect.center";
+                return true;
+            }
+            if (ownerType is AssetType { AssetKind: "tilemap" } &&
+                fieldAccess.FieldName is "cols" or "rows" or "tile_size" or "layer_count")
+            {
+                propertyName = $"tilemap.{fieldAccess.FieldName}";
+                return true;
+            }
+            current = fieldAccess.Target;
+        }
+
+        propertyName = null;
+        return false;
+    }
+
+    private void ValidateForStmt(ForStmt forStmt, LexicalScope scope)
+    {
+        var condType = ResolveExpr(forStmt.Condition, scope, expectedType: ResolvedType.Bool);
+        if (!condType.IsError && condType != ResolvedType.Bool)
+        {
+            ReportError($"'for' condition must evaluate to 'bool', got '{condType}'.", forStmt.Span);
+        }
+
+        var loopScope = scope.CreateChild(isInsideLoop: true);
+        ValidateBlockStmt(forStmt.Body, loopScope, createChildScope: false);
+        _model.RecordType(forStmt, ResolvedType.Void);
+    }
+
+    private void ValidateForRangeStmt(ForRangeStmt forRangeStmt, LexicalScope scope)
+    {
+        var startType = ResolveExpr(forRangeStmt.Start, scope, expectedType: ResolvedType.Int);
+        if (!startType.IsError && !startType.IsInteger)
+        {
+            ReportError($"'for' range start must be an integer type, got '{startType}'.", forRangeStmt.Start.Span);
+        }
+
+        var endType = ResolveExpr(forRangeStmt.End, scope, expectedType: ResolvedType.Int);
+        if (!endType.IsError && !endType.IsInteger)
+        {
+            ReportError($"'for' range end must be an integer type, got '{endType}'.", forRangeStmt.End.Span);
+        }
+
+        var loopScope = scope.CreateChild(isInsideLoop: true);
+        loopScope.TryDeclareLocal(
+            new VariableSymbol(
+                Name: forRangeStmt.IteratorName,
+                Scope: MemoryScope.Stack,
+                Type: ResolvedType.Int,
+                IsReadOnly: true,
+                Declaration: forRangeStmt
+            )
+        );
+
+        _model.RecordType(forRangeStmt, ResolvedType.Int);
+        ValidateBlockStmt(forRangeStmt.Body, loopScope, createChildScope: false);
     }
 
     private void ValidateForEachStmt(ForEachStmt forEachStmt, LexicalScope scope)
@@ -1056,7 +1554,7 @@ public sealed class SemanticAnalyzer
             iteratorType = actorSym.RefType;
         }
 
-        var loopScope = scope.CreateChild();
+        var loopScope = scope.CreateChild(isInsideLoop: true);
         loopScope.TryDeclareLocal(
             new VariableSymbol(
                 Name: forEachStmt.IteratorName,
@@ -1069,6 +1567,16 @@ public sealed class SemanticAnalyzer
 
         _model.RecordType(forEachStmt, iteratorType);
         ValidateBlockStmt(forEachStmt.Body, loopScope, createChildScope: false);
+    }
+
+    private void ValidateBreakStmt(BreakStmt breakStmt, LexicalScope scope)
+    {
+        if (!scope.IsInsideLoop)
+        {
+            ReportError("'break' statement can only be used inside a 'for' or 'each' loop.", breakStmt.Span);
+        }
+
+        _model.RecordType(breakStmt, ResolvedType.Void);
     }
 
     private void ValidateReturnStmt(ReturnStmt returnStmt, LexicalScope scope)
@@ -1408,6 +1916,16 @@ public sealed class SemanticAnalyzer
         if (_symbols.Actors.TryGetValue(idExpr.Name, out var actorSym) && actorSym.IsSingleton)
             return actorSym.RefType;
 
+        if (_symbols.Enums.TryGetValue(idExpr.Name, out var enumSym))
+        {
+            string example = enumSym.Variants.Count > 0 ? enumSym.Variants[0] : "Variant";
+            ReportError(
+                $"'{idExpr.Name}' is an enum type; access a variant such as '{idExpr.Name}.{example}'.",
+                idExpr.Span
+            );
+            return ResolvedType.Error;
+        }
+
         ReportError($"Undeclared identifier '{idExpr.Name}'.", idExpr.Span);
         return ResolvedType.Error;
     }
@@ -1432,6 +1950,13 @@ public sealed class SemanticAnalyzer
                     return ResolvedType.Bool;
 
                 ReportError($"Logical '!' operator requires a 'bool' operand, got '{operandType}'.", unaryExpr.Span);
+                return ResolvedType.Error;
+
+            case UnaryOp.BitNot:
+                if (operandType.IsInteger)
+                    return operandType == ResolvedType.U32 ? ResolvedType.U32 : ResolvedType.Int;
+
+                ReportError($"Bitwise '~' operator requires an integer operand, got '{operandType}'.", unaryExpr.Span);
                 return ResolvedType.Error;
 
             default:
@@ -1461,6 +1986,26 @@ public sealed class SemanticAnalyzer
 
                 ReportError(
                     $"Operator '{FormatBinaryOp(binaryExpr.Op)}' cannot be applied to operands of type '{leftType}' and '{rightType}'.",
+                    binaryExpr.Span
+                );
+                return ResolvedType.Error;
+            }
+
+            case BinaryOp.BitAnd:
+            case BinaryOp.BitOr:
+            case BinaryOp.BitXor:
+            case BinaryOp.ShiftLeft:
+            case BinaryOp.ShiftRight:
+            {
+                if (leftType.IsInteger && rightType.IsInteger)
+                {
+                    bool unsigned32 = leftType == ResolvedType.U32 ||
+                        (binaryExpr.Op is BinaryOp.BitAnd or BinaryOp.BitOr or BinaryOp.BitXor && rightType == ResolvedType.U32);
+                    return unsigned32 ? ResolvedType.U32 : ResolvedType.Int;
+                }
+
+                ReportError(
+                    $"Bitwise operator '{FormatBinaryOp(binaryExpr.Op)}' requires integer operands, got '{leftType}' and '{rightType}'.",
                     binaryExpr.Span
                 );
                 return ResolvedType.Error;
@@ -1568,6 +2113,23 @@ public sealed class SemanticAnalyzer
 
     private ResolvedType ResolveFieldAccessExpr(FieldAccessExpr fieldExpr, LexicalScope scope)
     {
+        // Enum variant access: EnumName.Variant
+        if (fieldExpr.Target is IdentifierExpr enumId &&
+            _symbols.Enums.TryGetValue(enumId.Name, out var enumSym))
+        {
+            _model.RecordType(fieldExpr.Target, enumSym.Type);
+            if (enumSym.Variants.Contains(fieldExpr.FieldName))
+            {
+                return enumSym.Type;
+            }
+
+            ReportError(
+                $"Enum '{enumSym.Name}' does not contain a variant named '{fieldExpr.FieldName}'.",
+                fieldExpr.Span
+            );
+            return ResolvedType.Error;
+        }
+
         var targetType = ResolveExpr(fieldExpr.Target, scope, expectedType: null);
         if (targetType.IsError)
             return ResolvedType.Error;
@@ -1589,6 +2151,8 @@ public sealed class SemanticAnalyzer
             case PrimitiveType { Kind: PrimitiveKind.Rect }:
                 if (field is "x" or "y" or "w" or "h")
                     return ResolvedType.F32;
+                if (field == "center")
+                    return ResolvedType.Vec2;
                 break;
 
             case PrimitiveType { Kind: PrimitiveKind.Color }:
@@ -1618,6 +2182,11 @@ public sealed class SemanticAnalyzer
 
             case FixedArrayType arrayType:
                 if (field is "len" or "length" or "capacity")
+                    return ResolvedType.Int;
+                break;
+
+            case AssetType { AssetKind: "tilemap" }:
+                if (field is "cols" or "rows" or "tile_size" or "layer_count")
                     return ResolvedType.Int;
                 break;
         }
@@ -1786,6 +2355,247 @@ public sealed class SemanticAnalyzer
             }
         }
 
+        // Built-in methods on 'rect'
+        if (receiverType == ResolvedType.Rect)
+        {
+            switch (methodName)
+            {
+                case "overlaps":
+                    if (callExpr.Arguments.Count != 1)
+                    {
+                        ReportError($"Method 'rect.overlaps(other)' takes 1 argument, got {callExpr.Arguments.Count}.", callExpr.Span);
+                        foreach (var arg in callExpr.Arguments)
+                            ResolveExpr(arg, scope, expectedType: null);
+                    }
+                    else
+                    {
+                        var argType = ResolveExpr(callExpr.Arguments[0], scope, expectedType: ResolvedType.Rect);
+                        if (!ResolvedType.IsAssignableTo(argType, ResolvedType.Rect))
+                        {
+                            ReportError($"Argument to 'rect.overlaps' must be 'rect', got '{argType}'.", callExpr.Arguments[0].Span);
+                        }
+                    }
+                    _model.RecordType(memberAccess, new FunctionType([ResolvedType.Rect], ResolvedType.Bool));
+                    return ResolvedType.Bool;
+
+                case "contains":
+                    if (callExpr.Arguments.Count != 1)
+                    {
+                        ReportError($"Method 'rect.contains(point)' takes 1 argument, got {callExpr.Arguments.Count}.", callExpr.Span);
+                        foreach (var arg in callExpr.Arguments)
+                            ResolveExpr(arg, scope, expectedType: null);
+                    }
+                    else
+                    {
+                        var argType = ResolveExpr(callExpr.Arguments[0], scope, expectedType: ResolvedType.Vec2);
+                        if (!ResolvedType.IsAssignableTo(argType, ResolvedType.Vec2))
+                        {
+                            ReportError($"Argument to 'rect.contains' must be 'vec2', got '{argType}'.", callExpr.Arguments[0].Span);
+                        }
+                    }
+                    _model.RecordType(memberAccess, new FunctionType([ResolvedType.Vec2], ResolvedType.Bool));
+                    return ResolvedType.Bool;
+            }
+        }
+
+        // Built-in methods on 'sound' (SFX) and 'music' (BGM) assets
+        if (receiverType is AssetType { AssetKind: "sound" or "music" } audioAsset)
+        {
+            switch (methodName)
+            {
+                case "play":
+                    if (callExpr.Arguments.Count > 1)
+                    {
+                        ReportError($"Method '{audioAsset.AssetKind}.play([volume])' takes 0 or 1 argument, got {callExpr.Arguments.Count}.", callExpr.Span);
+                        foreach (var arg in callExpr.Arguments)
+                            ResolveExpr(arg, scope, expectedType: null);
+                    }
+                    else if (callExpr.Arguments.Count == 1)
+                    {
+                        var volType = ResolveExpr(callExpr.Arguments[0], scope, expectedType: ResolvedType.F32);
+                        if (!ResolvedType.IsAssignableTo(volType, ResolvedType.F32))
+                            ReportError($"Argument 'volume' to '{audioAsset.AssetKind}.play' must be 'f32', got '{volType}'.", callExpr.Arguments[0].Span);
+                    }
+                    _model.RecordType(memberAccess, new FunctionType([], ResolvedType.Void));
+                    return ResolvedType.Void;
+
+                case "stop" or "pause" or "resume" when audioAsset.AssetKind == "music":
+                    if (callExpr.Arguments.Count != 0)
+                    {
+                        ReportError($"Method 'music.{methodName}()' takes 0 arguments, got {callExpr.Arguments.Count}.", callExpr.Span);
+                        foreach (var arg in callExpr.Arguments)
+                            ResolveExpr(arg, scope, expectedType: null);
+                    }
+                    _model.RecordType(memberAccess, new FunctionType([], ResolvedType.Void));
+                    return ResolvedType.Void;
+            }
+        }
+
+        // Built-in methods on 'tilemap' assets
+        if (receiverType is AssetType { AssetKind: "tilemap" })
+        {
+            bool isMutable = memberAccess.Target is IdentifierExpr mapId &&
+                             _symbols.Assets.TryGetValue(mapId.Name, out var mapSym) &&
+                             mapSym.IsMutable;
+            string mapDisplayName = memberAccess.Target is IdentifierExpr idDisp ? idDisp.Name : "tilemap";
+
+            switch (methodName)
+            {
+                case "draw":
+                    if (callExpr.Arguments.Count > 1)
+                    {
+                        ReportError($"Method 'tilemap.draw([origin])' takes 0 or 1 argument, got {callExpr.Arguments.Count}.", callExpr.Span);
+                        foreach (var arg in callExpr.Arguments)
+                            ResolveExpr(arg, scope, expectedType: null);
+                    }
+                    else if (callExpr.Arguments.Count == 1)
+                    {
+                        var argType = ResolveExpr(callExpr.Arguments[0], scope, expectedType: ResolvedType.Vec2);
+                        if (!ResolvedType.IsAssignableTo(argType, ResolvedType.Vec2))
+                            ReportError($"Argument 'origin' to 'tilemap.draw' must be 'vec2', got '{argType}'.", callExpr.Arguments[0].Span);
+                    }
+                    _model.RecordType(memberAccess, new FunctionType([], ResolvedType.Void));
+                    return ResolvedType.Void;
+
+                case "draw_layer":
+                    if (callExpr.Arguments.Count is < 1 or > 2)
+                    {
+                        ReportError($"Method 'tilemap.draw_layer(layer[, origin])' takes 1 or 2 arguments, got {callExpr.Arguments.Count}.", callExpr.Span);
+                        foreach (var arg in callExpr.Arguments)
+                            ResolveExpr(arg, scope, expectedType: null);
+                    }
+                    else
+                    {
+                        var layerType = ResolveExpr(callExpr.Arguments[0], scope, expectedType: ResolvedType.Int);
+                        if (!layerType.IsError && !layerType.IsInteger)
+                            ReportError($"Argument 'layer' to 'tilemap.draw_layer' must be an integer, got '{layerType}'.", callExpr.Arguments[0].Span);
+
+                        if (callExpr.Arguments.Count == 2)
+                        {
+                            var originType = ResolveExpr(callExpr.Arguments[1], scope, expectedType: ResolvedType.Vec2);
+                            if (!ResolvedType.IsAssignableTo(originType, ResolvedType.Vec2))
+                                ReportError($"Argument 'origin' to 'tilemap.draw_layer' must be 'vec2', got '{originType}'.", callExpr.Arguments[1].Span);
+                        }
+                    }
+                    _model.RecordType(memberAccess, new FunctionType([ResolvedType.Int], ResolvedType.Void));
+                    return ResolvedType.Void;
+
+                case "get_tile":
+                    if (callExpr.Arguments.Count != 3)
+                    {
+                        ReportError($"Method 'tilemap.get_tile(layer, col, row)' takes 3 arguments, got {callExpr.Arguments.Count}.", callExpr.Span);
+                        foreach (var arg in callExpr.Arguments)
+                            ResolveExpr(arg, scope, expectedType: null);
+                    }
+                    else
+                    {
+                        for (int i = 0; i < 3; i++)
+                        {
+                            var t = ResolveExpr(callExpr.Arguments[i], scope, expectedType: ResolvedType.Int);
+                            if (!t.IsError && !t.IsInteger)
+                                ReportError($"Argument {i + 1} to 'tilemap.get_tile' must be an integer, got '{t}'.", callExpr.Arguments[i].Span);
+                        }
+                    }
+                    _model.RecordType(memberAccess, new FunctionType([ResolvedType.Int, ResolvedType.Int, ResolvedType.Int], ResolvedType.Int));
+                    return ResolvedType.Int;
+
+                case "is_solid":
+                    if (callExpr.Arguments.Count != 2)
+                    {
+                        ReportError($"Method 'tilemap.is_solid(col, row)' takes 2 arguments, got {callExpr.Arguments.Count}.", callExpr.Span);
+                        foreach (var arg in callExpr.Arguments)
+                            ResolveExpr(arg, scope, expectedType: null);
+                    }
+                    else
+                    {
+                        for (int i = 0; i < 2; i++)
+                        {
+                            var t = ResolveExpr(callExpr.Arguments[i], scope, expectedType: ResolvedType.Int);
+                            if (!t.IsError && !t.IsInteger)
+                                ReportError($"Argument {i + 1} to 'tilemap.is_solid' must be an integer, got '{t}'.", callExpr.Arguments[i].Span);
+                        }
+                    }
+                    _model.RecordType(memberAccess, new FunctionType([ResolvedType.Int, ResolvedType.Int], ResolvedType.Bool));
+                    return ResolvedType.Bool;
+
+                case "collides_rect":
+                    if (callExpr.Arguments.Count != 1)
+                    {
+                        ReportError($"Method 'tilemap.collides_rect(hitbox)' takes 1 argument, got {callExpr.Arguments.Count}.", callExpr.Span);
+                        foreach (var arg in callExpr.Arguments)
+                            ResolveExpr(arg, scope, expectedType: null);
+                    }
+                    else
+                    {
+                        var argType = ResolveExpr(callExpr.Arguments[0], scope, expectedType: ResolvedType.Rect);
+                        if (!ResolvedType.IsAssignableTo(argType, ResolvedType.Rect))
+                            ReportError($"Argument to 'tilemap.collides_rect' must be 'rect', got '{argType}'.", callExpr.Arguments[0].Span);
+                    }
+                    _model.RecordType(memberAccess, new FunctionType([ResolvedType.Rect], ResolvedType.Bool));
+                    return ResolvedType.Bool;
+
+                case "set_tile":
+                    if (!isMutable)
+                        ReportError($"Cannot call 'set_tile' on read-only tilemap '{mapDisplayName}'. Declare it with 'mutable: true'.", callExpr.Span);
+
+                    if (callExpr.Arguments.Count != 4)
+                    {
+                        ReportError($"Method 'tilemap.set_tile(layer, col, row, tile_id)' takes 4 arguments, got {callExpr.Arguments.Count}.", callExpr.Span);
+                        foreach (var arg in callExpr.Arguments)
+                            ResolveExpr(arg, scope, expectedType: null);
+                    }
+                    else
+                    {
+                        for (int i = 0; i < 4; i++)
+                        {
+                            var t = ResolveExpr(callExpr.Arguments[i], scope, expectedType: ResolvedType.Int);
+                            if (!t.IsError && !t.IsInteger)
+                                ReportError($"Argument {i + 1} to 'tilemap.set_tile' must be an integer, got '{t}'.", callExpr.Arguments[i].Span);
+                        }
+                    }
+                    _model.RecordType(memberAccess, new FunctionType([ResolvedType.Int, ResolvedType.Int, ResolvedType.Int, ResolvedType.Int], ResolvedType.Void));
+                    return ResolvedType.Void;
+
+                case "set_solid":
+                    if (!isMutable)
+                        ReportError($"Cannot call 'set_solid' on read-only tilemap '{mapDisplayName}'. Declare it with 'mutable: true'.", callExpr.Span);
+
+                    if (callExpr.Arguments.Count != 3)
+                    {
+                        ReportError($"Method 'tilemap.set_solid(col, row, solid)' takes 3 arguments, got {callExpr.Arguments.Count}.", callExpr.Span);
+                        foreach (var arg in callExpr.Arguments)
+                            ResolveExpr(arg, scope, expectedType: null);
+                    }
+                    else
+                    {
+                        for (int i = 0; i < 2; i++)
+                        {
+                            var t = ResolveExpr(callExpr.Arguments[i], scope, expectedType: ResolvedType.Int);
+                            if (!t.IsError && !t.IsInteger)
+                                ReportError($"Argument {i + 1} to 'tilemap.set_solid' must be an integer, got '{t}'.", callExpr.Arguments[i].Span);
+                        }
+                        var solidType = ResolveExpr(callExpr.Arguments[2], scope, expectedType: ResolvedType.Bool);
+                        if (!solidType.IsError && solidType != ResolvedType.Bool)
+                            ReportError($"Argument 'solid' to 'tilemap.set_solid' must be 'bool', got '{solidType}'.", callExpr.Arguments[2].Span);
+                    }
+                    _model.RecordType(memberAccess, new FunctionType([ResolvedType.Int, ResolvedType.Int, ResolvedType.Bool], ResolvedType.Void));
+                    return ResolvedType.Void;
+
+                case "reset":
+                    if (!isMutable)
+                        ReportError($"Cannot call 'reset' on read-only tilemap '{mapDisplayName}'. Declare it with 'mutable: true'.", callExpr.Span);
+
+                    if (callExpr.Arguments.Count != 0)
+                    {
+                        ReportError($"Method 'tilemap.reset()' takes 0 arguments, got {callExpr.Arguments.Count}.", callExpr.Span);
+                        foreach (var arg in callExpr.Arguments)
+                            ResolveExpr(arg, scope, expectedType: null);
+                    }
+                    _model.RecordType(memberAccess, new FunctionType([], ResolvedType.Void));
+                    return ResolvedType.Void;
+            }
+        }
+
         // Actor methods via ref<ActorName>
         if (receiverType is ActorRefType actorRef &&
             _symbols.Actors.TryGetValue(actorRef.ActorName, out var actorSym) &&
@@ -1879,6 +2689,11 @@ public sealed class SemanticAnalyzer
         BinaryOp.Mul => "*",
         BinaryOp.Div => "/",
         BinaryOp.Mod => "%",
+        BinaryOp.ShiftLeft => "<<",
+        BinaryOp.ShiftRight => ">>",
+        BinaryOp.BitAnd => "&",
+        BinaryOp.BitXor => "^",
+        BinaryOp.BitOr => "|",
         BinaryOp.Equal => "==",
         BinaryOp.NotEqual => "!=",
         BinaryOp.Less => "<",
@@ -1897,6 +2712,11 @@ public sealed class SemanticAnalyzer
         AssignOp.SubAssign => "-=",
         AssignOp.MulAssign => "*=",
         AssignOp.DivAssign => "/=",
+        AssignOp.BitAndAssign => "&=",
+        AssignOp.BitOrAssign => "|=",
+        AssignOp.BitXorAssign => "^=",
+        AssignOp.ShiftLeftAssign => "<<=",
+        AssignOp.ShiftRightAssign => ">>=",
         _ => op.ToString()
     };
 }

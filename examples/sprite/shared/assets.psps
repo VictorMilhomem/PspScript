@@ -1,4 +1,5 @@
 // Compile-time baked PNG sprites from examples/assets/
+import input
 
 asset house_tex = texture("../assets/Objects/Free_Chicken_House.png", format: ABGR8888)
 asset egg_tex = texture("../assets/Objects/Egg_item.png", format: ABGR8888)
@@ -6,12 +7,5 @@ asset egg_tex = texture("../assets/Objects/Egg_item.png", format: ABGR8888)
 message CycleTint {
     step: int
 }
-
-// Input bitmasks matching Runtime/psps_input.h
-global var BTN_CROSS: int = 1
-global var BTN_UP: int = 16
-global var BTN_DOWN: int = 32
-global var BTN_LEFT: int = 64
-global var BTN_RIGHT: int = 128
 
 level var active_tint_index: int = 0

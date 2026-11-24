@@ -23,20 +23,7 @@ actor ChickenHouse {
     }
 
     update(dt: f32) {
-        temp var dir: vec2 = { 0.0, 0.0 }
-
-        if button_held(BTN_LEFT) {
-            dir.x -= 1.0
-        }
-        if button_held(BTN_RIGHT) {
-            dir.x += 1.0
-        }
-        if button_held(BTN_UP) {
-            dir.y -= 1.0
-        }
-        if button_held(BTN_DOWN) {
-            dir.y += 1.0
-        }
+        temp var dir: vec2 = dpad_vector()
 
         if dir.length() > 0.0 {
             pos += dir.normalized() * speed * dt

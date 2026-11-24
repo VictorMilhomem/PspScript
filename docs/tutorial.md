@@ -6,6 +6,7 @@ Welcome to **PSPScript** — a domain-specific game scripting language designed 
 
 ## Table of Contents
 
+- [What's New in v0.2 (Migrating from v0.1)](#whats-new-in-v02-migrating-from-v01)
 1. [Why PSPScript? (The PSP Hardware Model)](#1-why-pspscript-the-psp-hardware-model)
 2. [Quick Start & CLI Workflow](#2-quick-start--cli-workflow)
 3. [Game Configuration, Imports & Static Memory Budget](#3-game-configuration-imports--static-memory-budget)
@@ -20,6 +21,49 @@ Welcome to **PSPScript** — a domain-specific game scripting language designed 
 12. [2D Camera, Tilemaps, Bitmap Fonts & Save Data](#12-2d-camera-tilemaps-bitmap-fonts--save-data)
 13. [The Deterministic 4-Phase Frame Loop](#13-the-deterministic-4-phase-frame-loop)
 14. [Complete Playable Examples](#14-complete-playable-examples)
+
+---
+
+## What's New in v0.2 (Migrating from v0.1)
+
+PSPScript **v0.2** streamlines everyday PSP game code with unified `for` loops, built-in `rect` geometry helpers, bare module imports, and a bundled Standard Library (`StdLib/`).
+
+| Area | v0.1 | v0.2 |
+| :--- | :--- | :--- |
+| **Loops** *(breaking)* | `while cond { ... }` | `for cond { ... }` (Go-style), `for i in start..end { ... }`, and `break` (`while` removed) |
+| **Imports** | Relative paths only (`import "shared/math.psps"`) | Adds bare module imports (`import input`, `import collision`, `import "collision"`) with local override & `StdLib/` fallback |
+| **Standard Library** | Manual boilerplate for button bitmasks & 2D shapes | Bundled zero-allocation `StdLib/input.psps` (`BTN_*`, `dpad_vector()`) and `StdLib/collision.psps` (`AABB`, `Circle`) |
+| **`rect` Geometry** | Manual AABB math (`check_aabb(...)`) | Built-in `r.overlaps(other)`, `r.contains(point)`, and read-only `r.center` |
+| **Enums & `match`** | Integer constants + `if`/`else if` chains | First-class nominal `enum` (`Season.Spring`) and exhaustive `match` statements |
+| **Baked Tilemaps** | Manual `[N]u8` arrays + `draw_tilemap(...)` | Compile-time Tiled (`.tmx`/`.tmj`) baking via `asset map = tilemap(...)` with multi-layer draw, collision queries, and opt-in `mutable: true` |
+| **Audio (`WAV` → PCM)** | Not available | Compile-time `.wav` baking via `sound(...)` / `music(...)` + zero-heap SDL2 8-SFX / 1-BGM mixer (`psps_audio.h`) |
+| **Imported Assets** | Resolved relative to entry directory only | Resolves relative to the declaring file first, then falls back to entry directory |
+
+### Quick Migration Examples
+
+```pspscript
+// v0.1: manual loop, manual button bitmasks, manual AABB helper
+global var BTN_LEFT: int = 64
+var y: f32 = 20.0
+while y < 250.0 {
+    draw_rect({ 239.0, y, 2.0, 10.0 }, #263859)
+    y += 20.0
+}
+if check_aabb(ax, ay, aw, ah, bx, by, bw, bh) { ... }
+
+// v0.2: StdLib bare import, range `for`, and built-in `rect` helpers
+import input
+
+var dir: vec2 = dpad_vector()
+for i in 0..12 {
+    draw_rect({ 239.0, 20.0 + (i * 20), 2.0, 10.0 }, #263859)
+}
+var a: rect = { ax, ay, aw, ah }
+var b: rect = { bx, by, bw, bh }
+if a.overlaps(b) {
+    var mid: vec2 = a.center
+}
+```
 
 ---
 
@@ -80,19 +124,37 @@ import "actors/paddles"      // '.psps' extension is optional
 
 ### Game Configuration (`game`)
 
-Every `.psps` program can declare a `game` block to configure the PSP `EBOOT.PBP` title, target frame rate, and static RAM budget:
+Every `.psps` program can declare a `game` block to configure the PSP `EBOOT.PBP` metadata, XMB artwork, static RAM budget, and desktop preview settings:
 
 ```pspscript
 game "StarDust PSP" {
+    id: "STDS00001",
+    version: "01.00",
     ram_budget: 16MB,
+    extra_ram: true,
     fps: 60,
-    entry: Gameplay
+    entry: Gameplay,
+    window_scale: 2,
+    icon: "assets/icon.png",
+    background: "assets/bg.png",
+    overlay: "assets/overlay.png"
 }
 ```
 
-- **Title**: Stamped automatically into `PARAM.SFO` when building `EBOOT.PBP` and used as the desktop window title.
-- **`ram_budget`**: Accepts size literals (`KB` or `MB`, e.g., `512KB`, `16MB`). During semantic analysis, the compiler sums the static byte size of all globals, state fields, fixed arrays, and actor pools and fails compilation if the budget is exceeded.
-- **`entry`**: Explicitly specifies the starting `state` entered at boot (accepts either an identifier like `entry: Gameplay` or a quoted string `entry: "Gameplay"`). Validated at compile time so typos fail before code generation; if omitted, the first declared `state` is used.
+| Key | Value Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | `string` (1–9 `A-Z0-9`) | `"PSPS00001"` | PSP `DISC_ID` in `PARAM.SFO` and save data folder ID (`PSPS_SAVE_GAME_ID`) |
+| `version` | `string` | `"01.00"` | `APP_VER` stamped into `PARAM.SFO` |
+| `ram_budget` | size (`KB`/`MB`) or `int` | `16MB` | Static RAM ceiling verified at compile time |
+| `extra_ram` | `bool` | `true` | Enables `MEMSIZE=1` (64 MB on PSP-2000+); set `false` for strict 32 MB PSP-1000 compatibility |
+| `fps` | positive `int` | `60` | Target frame rate |
+| `entry` | state `IDENT` or `string` | First `state` | Starting game state entered at boot (validated at compile time) |
+| `window_scale` | `int` (`1..4`) | `2` | Desktop SDL2 preview window scale (`psps_video_init_scaled`) |
+| `icon` | PNG path `string` | `NULL` | XMB `ICON0.PNG` (recommended `144×80` PNG) |
+| `background` | PNG path `string` | `NULL` | XMB `PIC1.PNG` (recommended `480×272` PNG) |
+| `overlay` | PNG path `string` | `NULL` | XMB `PIC0.PNG` (recommended `310×180` PNG) |
+
+Unknown keys in `game { ... }` fail at compile time so typos are caught immediately.
 
 ---
 
@@ -128,6 +190,12 @@ var offset: vec2 = pos - { 240.0, 136.0 }
 var dist: f32 = offset.length()
 var unit: vec2 = offset.normalized()
 var alignment: f32 = unit.dot({ 1.0, 0.0 })
+
+// Built-in rect methods & read-only center property
+var other_box: rect = { 24.0, 44.0, 16.0, 16.0 }
+var hit: bool = box.overlaps(other_box)
+var inside: bool = box.contains(pos)
+var mid: vec2 = box.center               // Read-only computed property ({ x + w * 0.5, y + h * 0.5 })
 ```
 
 ### Native PSP Colors (`color`)
@@ -221,6 +289,21 @@ struct Stats {
     lives: u8 = 3,
     shield: f32 = 100.0
 }
+```
+
+### Enumerated Types (`enum`)
+
+Enums define nominal, type-safe sets of named variants (4 bytes / `int32_t` in C99). Different enum types and `int` cannot be mixed implicitly, and uninitialized enum variables default to their first variant (`0`):
+
+```pspscript
+enum Season {
+    Spring,
+    Summer,
+    Fall,
+    Winter
+}
+
+global var current_season: Season = Season.Spring
 ```
 
 ### Compile-Time Assets (`asset`)
@@ -405,24 +488,50 @@ When `goto NextState` executes:
 PSPScript supports familiar, semicolon-free control flow and typed functions:
 
 ```pspscript
-fn check_aabb(ax: f32, ay: f32, aw: f32, ah: f32, bx: f32, by: f32, bw: f32, bh: f32) -> bool {
-    return (ax < bx + bw) && (ax + aw > bx) && (ay < by + bh) && (ay + ah > by)
+fn draw_dashed_net() {
+    for i in 0..12 {
+        draw_rect({ 239.0, 20.0 + (i * 20), 2.0, 10.0 }, #263859)
+    }
 }
 
-fn draw_dashed_net() {
-    var y: f32 = 20.0
-    while y < 250.0 {
-        draw_rect({ 239.0, y, 2.0, 10.0 }, #263859)
-        y += 20.0
+fn sum_scores(scores: [8]int) -> int {
+    var total: int = 0
+    for i in 0..scores.len {
+        total += scores[i]
     }
+    return total
+}
+
+fn wait_until_edge(x: f32) -> f32 {
+    for x < 250.0 {
+        x += 20.0
+    }
+    return x
 }
 ```
 
 - `if condition { ... } else if other { ... } else { ... }`
-- `while condition { ... }`
-- `each item in PoolName { ... }`
+- `match value { Pattern => stmt_or_block, _ => ... }` — exhaustive pattern matching over `enum` or integer types (lowers to C99 `switch`). Every variant of an `enum` must be handled unless a `_` wildcard arm is present; integer `match` statements always require `_`.
+- `for condition { ... }` — Go-style conditional loop (`condition` must be `bool`)
+- `for i in start..end { ... }` — exclusive integer range loop (`i` is an immutable, block-scoped `int`)
+- `each item in PoolName { ... }` — safe active-slot iteration over actor pools
+- `break` — exits the innermost `for` or `each` loop immediately
 - `return` or `return expr` (non-void functions must return a value on all code paths)
+- **Bitwise operators (integers only):** `&`, `|`, `^`, `<<`, `>>`, unary `~`, and compound assignments `&=`, `|=`, `^=`, `<<=`, `>>=` (follows standard C99 precedence; useful for combining PSP button bitmasks like `BTN_CROSS | BTN_START` or flag fields).
 - Functions without `-> Type` default to `void`.
+
+```pspscript
+fn season_speed(s: Season) -> f32 {
+    match s {
+        Season.Spring => return 1.0,
+        Season.Summer => {
+            return 1.2
+        },
+        Season.Fall => return 0.9,
+        Season.Winter => return 0.6
+    }
+}
+```
 
 ---
 
@@ -470,7 +579,32 @@ PSP button bitmasks (matching `Runtime/psps_input.h`):
 
 ### Standard Library Modules (`StdLib/`)
 
-PSPScript ships with zero-allocation standard library modules written in pure `f32` PSPScript, imported by bare name (`import collision` or `import "collision"`):
+PSPScript ships with zero-allocation standard library modules written in pure `f32` PSPScript, imported by bare name (`import input`, `import collision`, or quoted `import "collision"`):
+
+#### `input` (`StdLib/input.psps`)
+
+Provides all PSP button bitmask constants (`BTN_CROSS`, `BTN_CIRCLE`, `BTN_SQUARE`, `BTN_TRIANGLE`, `BTN_UP`, `BTN_DOWN`, `BTN_LEFT`, `BTN_RIGHT`, `BTN_L`, `BTN_R`, `BTN_START`, `BTN_SELECT`) and a D-Pad vector helper:
+
+| Symbol | Type / Signature | Description |
+| :--- | :--- | :--- |
+| `BTN_*` | `global var ...: int` | PSP controller button bitmasks matching `Runtime/psps_input.h` |
+| `dpad_vector` | `() -> vec2` | Returns unnormalized directional vector (`-1.0..1.0` per axis) from held D-Pad buttons |
+
+```pspscript
+import input
+
+actor Player {
+    pos: vec2 = { 216.0, 112.0 }
+    speed: f32 = 140.0
+
+    update(dt: f32) {
+        temp var dir: vec2 = dpad_vector()
+        if dir.length() > 0.0 {
+            pos += dir.normalized() * speed * dt
+        }
+    }
+}
+```
 
 #### `collision` (`StdLib/collision.psps`)
 
@@ -478,13 +612,12 @@ Value structs:
 - `AABB { pos: vec2 = { 0.0, 0.0 }, size: vec2 = { 0.0, 0.0 } }`
 - `Circle { center: vec2 = { 0.0, 0.0 }, radius: f32 = 0.0 }`
 
-Pure collision queries:
+Pure collision queries (for built-in `rect` overlap/containment, use `r.overlaps(other)` and `r.contains(point)` directly):
 
 | Function | Signature | Description |
 | :--- | :--- | :--- |
 | `aabb_overlaps` | `(a: AABB, b: AABB) -> bool` | Axis-aligned bounding box overlap test |
 | `aabb_contains_point` | `(box: AABB, point: vec2) -> bool` | Inclusive point-in-AABB test |
-| `rect_overlaps` | `(a: rect, b: rect) -> bool` | Overlap test for built-in `rect` values |
 | `circle_overlaps` | `(a: Circle, b: Circle) -> bool` | Squared-distance circle-circle overlap test |
 | `circle_aabb_overlaps` | `(c: Circle, box: AABB) -> bool` | Closest-point circle-AABB overlap test |
 
@@ -552,6 +685,79 @@ state Overworld {
 - **PSP Hardware (`__PSP__`)**: `save_game()` and `load_game()` invoke `sceUtilitySavedata` (`PSP_UTILITY_SAVEDATA_AUTOSAVE` / `AUTOLOAD`) to persist `DATA.BIN` under `ms0:/PSP/SAVEDATA/`.
 - **Desktop Preview**: The same checksummed binary format is saved to `savedata/<GAME_ID>.bin` for local testing.
 
+### Compile-Time Baked Tiled Tilemaps (`.tmx` / `.tmj`)
+
+For full levels authored in [Tiled](https://www.mapeditor.org/), declare a `tilemap` asset. PSPScript bakes all visible tile layers (`uint16_t` cells with 14-bit tile IDs + H/V flip flags) and a compact collision grid (from a `"Collision"` layer and/or tiles with a `solid = true` boolean property) directly into static C99 arrays at compile time:
+
+```pspscript
+// Share an explicit texture across multiple maps (saves PSP VRAM)
+asset world_sheet = texture("tiles.png", format: ABGR8888)
+asset level1 = tilemap("maps/level1.tmx", tileset: world_sheet)
+
+// Or auto-bake the tileset PNG from Tiled + enable runtime tile edits (auto-reset on 'goto')
+asset farm = tilemap("maps/farm.tmj", mutable: true, collision_layer: "Collision")
+
+state Overworld {
+    player_box: rect = { 32.0, 32.0, 14.0, 14.0 }
+
+    update(dt: f32) {
+        if !farm.collides_rect(player_box) {
+            // Safe to move...
+        }
+        farm.set_tile(0, 2, 2, 5)
+    }
+
+    draw() {
+        set_camera_enabled(true)
+        farm.draw_layer(0)   // Ground layer
+        // Draw actors here...
+        farm.draw_layer(1)   // Foreground layer
+    }
+}
+```
+
+| Member | Signature / Type | Description |
+| :--- | :--- | :--- |
+| `.cols`, `.rows`, `.tile_size`, `.layer_count` | `int` (read-only) | Compile-time map dimensions |
+| `.draw([origin])` | `void` | Draws all visible non-collision layers with 480×272 camera culling |
+| `.draw_layer(layer[, origin])` | `void` | Draws a single layer (supports H/V tile flips) |
+| `.get_tile(layer, col, row)` | `int` | Bounds-checked tile ID lookup (`0` = empty or out of bounds) |
+| `.is_solid(col, row)` | `bool` | Bounds-checked collision grid lookup |
+| `.collides_rect(hitbox)` | `bool` | Returns `true` if any tile overlapped by `hitbox: rect` is solid |
+| `.set_tile(layer, col, row, id)` | `void` | Mutates tile cell at runtime (requires `mutable: true`) |
+| `.set_solid(col, row, solid)` | `void` | Mutates collision cell at runtime (requires `mutable: true`) |
+| `.reset()` | `void` | Restores writable `.bss` map from `.rodata` template (requires `mutable: true`; also runs automatically on `goto`) |
+
+### Compile-Time Baked WAV Audio (`sound` & `music`)
+
+PSPScript bakes uncompressed 8-bit/16-bit PCM `.wav` files directly into static `.rodata` `int16_t` arrays at compile time, mixed by a zero-heap 44.1 kHz SDL2 software mixer (`Runtime/psps_audio.h`, 8 concurrent SFX voices + 1 dedicated looping BGM channel):
+
+```pspscript
+asset bounce_sfx = sound("sfx/bounce.wav")             // Auto-normalized to mono 44.1 kHz
+asset theme_bgm  = music("bgm/theme.wav", rate: 22050) // Preserves mono/stereo; 22.05 kHz halves RAM
+
+state Match {
+    init() {
+        set_master_volume(0.85)
+        theme_bgm.play(0.6)      // Loops seamlessly across 'goto' state transitions
+    }
+
+    update(dt: f32) {
+        if button_pressed(BTN_CROSS) {
+            bounce_sfx.play(0.9) // Or shorthand: play_sound(bounce_sfx, 0.9)
+        }
+    }
+}
+```
+
+| API | Description |
+| :--- | :--- |
+| `sfx.play([volume])` / `play_sound(sfx[, volume])` | Plays a `sound` asset (default volume `1.0`); steals oldest voice if all 8 SFX slots are busy |
+| `bgm.play([volume])` | Starts looping a `music` asset on the dedicated BGM channel |
+| `bgm.stop()` / `bgm.pause()` / `bgm.resume()` | Stops, pauses, or resumes the active BGM track |
+| `set_master_volume(vol: f32)` | Sets global mixer volume (`0.0..1.0`) |
+| `stop_all_sounds()` | Immediately silences all 8 SFX voices |
+
 ### Spritesheet Animation (`draw_subsprite` + `timer`)
 
 Combine `draw_subsprite` with an auto-ticking `timer` field for smooth frame-rate-independent animations:
@@ -613,9 +819,9 @@ Every compiled PSPScript program executes the same predictable loop per frame:
 
 Explore all three modular PSPScript projects in `examples/`:
 
-1. **[examples/pong/main.psps](../examples/pong/main.psps)** — Full Pong game with a message-driven `MainMenu` (`Button[4]`, `ButtonFocus`, `ButtonPress`), selectable CPU difficulty, `Ball[4]` pool, `PaddleBounce` messages, bitmap font HUD, and `save_game()` / `load_game()`.
-2. **[examples/sprite/main.psps](../examples/sprite/main.psps)** — Static PNG sprite baking (`Free_Chicken_House.png`, `Egg_item.png`), D-Pad movement with `temp var`, tint cycling via `CycleTint` message, and pooled bobbing `Egg[8]` actors.
-3. **[examples/anim/main.psps](../examples/anim/main.psps)** — 4-directional spritesheet animation (`Basic Charakter Spritesheet.png`, `Free Chicken Sprites.png`) using `draw_subsprite`, auto-ticking `timer` frame clocks, pooled `Chicken[6]` AI + `Startle` message, and 2D camera tracking.
+1. **[examples/pong/main.psps](../examples/pong/main.psps)** — Full Pong game with `import input`, built-in `rect.overlaps(...)` & `rect.center`, range `for i in 0..12`, message-driven `MainMenu` (`Button[4]`, `ButtonFocus`, `ButtonPress`), selectable CPU difficulty, `Ball[4]` pool, `PaddleBounce` messages, bitmap font HUD, and `save_game()` / `load_game()`.
+2. **[examples/sprite/main.psps](../examples/sprite/main.psps)** — Static PNG sprite baking (`Free_Chicken_House.png`, `Egg_item.png`), `import input` + `dpad_vector()` with `temp var`, tint cycling via `CycleTint` message, and pooled bobbing `Egg[8]` actors.
+3. **[examples/anim/main.psps](../examples/anim/main.psps)** — 4-directional spritesheet animation (`Basic Charakter Spritesheet.png`, `Free Chicken Sprites.png`) using `import input` + `dpad_vector()`, `draw_subsprite`, auto-ticking `timer` frame clocks, pooled `Chicken[6]` AI + `Startle` message, and 2D camera tracking.
 
 ```bash
 # Build PSP EBOOT.PBP for any example

@@ -11,6 +11,7 @@ actor Ball[4] {
         var speed_x: f32 = clamp(abs(vel.x) * 1.06, 180.0, 340.0)
         vel.x = speed_x * msg.dir_x
         vel.y = clamp(vel.y + (msg.offset_y * 160.0), -230.0, 230.0)
+        sfx_hit.play(0.9)
     }
 
     update(dt: f32) {
@@ -24,10 +25,12 @@ actor Ball[4] {
         if pos.y <= 16.0 {
             pos.y = 16.0
             vel.y = abs(vel.y)
+            sfx_chip.play(0.6)
         }
         if pos.y + size >= 256.0 {
             pos.y = 256.0 - size
             vel.y = -abs(vel.y)
+            sfx_chip.play(0.6)
         }
     }
 

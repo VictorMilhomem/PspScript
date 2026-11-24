@@ -5,6 +5,7 @@ TopDecl        ::= ImportDecl
                  | AssetDecl
                  | MessageDecl
                  | StructDecl
+                 | EnumDecl
                  | ActorDecl
                  | StateDecl
                  | GlobalVarDecl
@@ -16,8 +17,8 @@ ImportDecl     ::= "import" (STRING | IDENT)
 
 // Global EBOOT configuration and memory budget
 GameConfig     ::= "game" STRING "{" ConfigField* "}"
-ConfigField    ::= IDENT ":" (INT | SIZE_LITERAL | STRING | IDENT) ","?
-// E.g.: ram_budget: 16MB, fps: 60, entry: Match
+ConfigField    ::= IDENT ":" (INT | SIZE_LITERAL | STRING | BOOL | IDENT) ","?
+// E.g.: id: "PSPS00001", version: "01.00", ram_budget: 16MB, extra_ram: true, fps: 60, entry: Match, icon: "icon.png"
 
 // Assets processed at compile time
 AssetDecl      ::= "asset" IDENT "=" IDENT "(" STRING ("," ArgList)? ")"
@@ -28,6 +29,9 @@ MessageDecl    ::= "message" IDENT "{" FieldList? "}"
 
 // Passive data structures (values)
 StructDecl     ::= "struct" IDENT "{" FieldList? "}"
+
+// Nominal enumerated types (compile to C99 typedef enum)
+EnumDecl       ::= "enum" IDENT "{" (IDENT ("," IDENT)* ","?)? "}"
 
 // Actors with static capacity defined on the type (pool) or singleton (no brackets)
 ActorDecl      ::= "actor" IDENT ("[" INT "]")? "{" ActorMember* "}"
@@ -67,8 +71,11 @@ Block          ::= "{" Stmt* "}"
 Stmt           ::= LocalVarDecl
                  | AssignStmt
                  | IfStmt
-                 | WhileStmt
+                 | MatchStmt
+                 | ForStmt
+                 | ForRangeStmt
                  | ForEachStmt
+                 | BreakStmt
                  | ReturnStmt
                  | SendStmt
                  | SpawnStmt
@@ -94,19 +101,28 @@ ForEachStmt    ::= "each" IDENT "in" IDENT Block
 // E.g.: each b in Bullet { ... }
 
 IfStmt         ::= "if" Expr Block ("else" (IfStmt | Block))?
-WhileStmt      ::= "while" Expr Block
+MatchStmt      ::= "match" Expr "{" MatchArm* "}"
+MatchArm       ::= MatchPattern "=>" (Block | Stmt) ","?
+MatchPattern   ::= "_" | IDENT "." IDENT | "-"? INT
+ForStmt        ::= "for" Expr Block
+ForRangeStmt   ::= "for" IDENT "in" Expr ".." Expr Block
+BreakStmt      ::= "break"
 ReturnStmt     ::= "return" Expr?
-AssignStmt     ::= Expr ("=" | "+=" | "-=" | "*=" | "/=") Expr
+AssignStmt     ::= Expr ("=" | "+=" | "-=" | "*=" | "/=" | "&=" | "|=" | "^=" | "<<=" | ">>=") Expr
 ExprStmt       ::= Expr
 
 Expr           ::= LogicOr
 LogicOr        ::= LogicAnd ("||" LogicAnd)*
-LogicAnd       ::= Equality ("&&" Equality)*
+LogicAnd       ::= BitOr ("&&" BitOr)*
+BitOr          ::= BitXor ("|" BitXor)*
+BitXor         ::= BitAnd ("^" BitAnd)*
+BitAnd         ::= Equality ("&" Equality)*
 Equality       ::= Comparison (("==" | "!=") Comparison)*
-Comparison     ::= Term (("<" | "<=" | ">" | ">=") Term)*
+Comparison     ::= Shift (("<" | "<=" | ">" | ">=") Shift)*
+Shift          ::= Term (("<<" | ">>") Term)*
 Term           ::= Factor (("+" | "-") Factor)*
 Factor         ::= Unary (("*" | "/" | "%") Unary)*
-Unary          ::= ("!" | "-") Unary | Postfix
+Unary          ::= ("!" | "-" | "~") Unary | Postfix
 
 Postfix        ::= Primary ( CallSuffix | FieldSuffix | IndexSuffix )*
 CallSuffix     ::= "(" ArgList? ")"

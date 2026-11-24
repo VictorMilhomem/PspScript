@@ -238,28 +238,22 @@ public sealed partial class CCodeGenerator
         _writer.WriteLine();
 
         _writer.WriteLine("/* Initialize Video (480x272) & Controller Input */");
-        _writer.OpenBlock($"if (!psps_video_init(\"{CTypeMapper.EscapeCString(gameTitle)}\"))");
+        _writer.OpenBlock($"if (!psps_video_init_scaled(\"{CTypeMapper.EscapeCString(gameTitle)}\", {_symbols.WindowScale}))");
         _writer.WriteLine("return 1;");
         _writer.CloseBlock();
         _writer.WriteLine("psps_input_init();");
+        _writer.WriteLine("psps_audio_init();");
         _writer.WriteLine();
 
-        if (_symbols.Assets.Count > 0)
+        if (_texturesToUpload.Count > 0)
         {
-            _writer.WriteLine("/* Upload Compile-Time Baked Assets to VRAM */");
-            foreach (var asset in _symbols.Assets.Values)
+            _writer.WriteLine("/* Upload Compile-Time Baked Textures to VRAM */");
+            foreach (var (cVarName, baked) in _texturesToUpload)
             {
-                if (_bakedAssets.TryGetValue(asset.Name, out var baked))
-                {
-                    string loader = baked.Format == BakedPixelFormat.Abgr8888
-                        ? "psps_load_texture_abgr8888"
-                        : "psps_load_texture_rgba4444";
-                    _writer.WriteLine($"g_asset_{asset.Name} = {loader}(g_asset_{asset.Name}_pixels, {baked.Width}u, {baked.Height}u);");
-                }
-                else
-                {
-                    _writer.WriteLine($"g_asset_{asset.Name} = psps_load_texture_rgba4444(g_asset_{asset.Name}_pixels, 8u, 8u);");
-                }
+                string loader = baked.Format == BakedPixelFormat.Abgr8888
+                    ? "psps_load_texture_abgr8888"
+                    : "psps_load_texture_rgba4444";
+                _writer.WriteLine($"{cVarName} = {loader}({cVarName}_pixels, {baked.Width}u, {baked.Height}u);");
             }
             _writer.WriteLine();
         }
@@ -368,13 +362,14 @@ public sealed partial class CCodeGenerator
         _writer.CloseBlock();
         _writer.WriteLine();
 
-        if (_symbols.Assets.Count > 0)
+        if (_texturesToUpload.Count > 0)
         {
-            foreach (var asset in _symbols.Assets.Values)
+            foreach (var (cVarName, _) in _texturesToUpload)
             {
-                _writer.WriteLine($"psps_destroy_texture(&g_asset_{asset.Name});");
+                _writer.WriteLine($"psps_destroy_texture(&{cVarName});");
             }
         }
+        _writer.WriteLine("psps_audio_shutdown();");
         _writer.WriteLine("psps_input_shutdown();");
         _writer.WriteLine("psps_video_shutdown();");
         _writer.WriteLine("return 0;");

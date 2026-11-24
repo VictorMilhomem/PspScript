@@ -90,6 +90,11 @@ public sealed partial class CCodeGenerator
             return $"(-({operand}))";
         }
 
+        if (unaryExpr.Operator == UnaryOp.BitNot)
+        {
+            return $"(~({operand}))";
+        }
+
         return $"(!({operand}))";
     }
 
@@ -144,6 +149,11 @@ public sealed partial class CCodeGenerator
             BinaryOp.Mul => "*",
             BinaryOp.Div => "/",
             BinaryOp.Mod => "%",
+            BinaryOp.ShiftLeft => "<<",
+            BinaryOp.ShiftRight => ">>",
+            BinaryOp.BitAnd => "&",
+            BinaryOp.BitXor => "^",
+            BinaryOp.BitOr => "|",
             BinaryOp.Equal => "==",
             BinaryOp.NotEqual => "!=",
             BinaryOp.Less => "<",
@@ -160,6 +170,12 @@ public sealed partial class CCodeGenerator
 
     private string EmitFieldAccessExpr(FieldAccessExpr fieldExpr, EmissionContext ctx)
     {
+        if (fieldExpr.Target is IdentifierExpr enumId &&
+            _symbols.Enums.ContainsKey(enumId.Name))
+        {
+            return $"{enumId.Name}_{fieldExpr.FieldName}";
+        }
+
         var targetType = _model.GetTypeOrDefault(fieldExpr.Target);
         string field = fieldExpr.FieldName;
 
@@ -180,6 +196,11 @@ public sealed partial class CCodeGenerator
             return $"{actorRef.ActorName}_resolve_mut({handleExpr})->{field}";
         }
 
+        if (targetType == ResolvedType.Rect && field == "center")
+        {
+            return $"psps_rect_center({EmitExpr(fieldExpr.Target, ctx)})";
+        }
+
         if (targetType == ResolvedType.Color && field is "r" or "g" or "b" or "a")
         {
             return $"psps_color_{field}({EmitExpr(fieldExpr.Target, ctx)})";
@@ -188,6 +209,12 @@ public sealed partial class CCodeGenerator
         if (targetType is FixedArrayType fixedArr && field is "len" or "length" or "capacity")
         {
             return fixedArr.Length.ToString(CultureInfo.InvariantCulture);
+        }
+
+        if (targetType is AssetType { AssetKind: "tilemap" } &&
+            field is "cols" or "rows" or "tile_size" or "layer_count")
+        {
+            return $"(int32_t)({EmitExpr(fieldExpr.Target, ctx)}.{field})";
         }
 
         return $"{EmitExpr(fieldExpr.Target, ctx)}.{field}";
@@ -223,6 +250,73 @@ public sealed partial class CCodeGenerator
                     "dot" when callExpr.Arguments.Count == 1 =>
                         $"{prefix}_dot({receiverExpr}, {EmitExpr(callExpr.Arguments[0], ctx)})",
                     _ => "0.0f"
+                };
+            }
+
+            if (receiverType == ResolvedType.Rect)
+            {
+                return method switch
+                {
+                    "overlaps" when callExpr.Arguments.Count == 1 =>
+                        $"psps_rect_overlaps({receiverExpr}, {EmitExpr(callExpr.Arguments[0], ctx)})",
+                    "contains" when callExpr.Arguments.Count == 1 =>
+                        $"psps_rect_contains({receiverExpr}, {EmitExpr(callExpr.Arguments[0], ctx)})",
+                    _ => "false"
+                };
+            }
+
+            if (receiverType is AssetType { AssetKind: "sound" })
+            {
+                return method switch
+                {
+                    "play" when callExpr.Arguments.Count == 0 =>
+                        $"psps_audio_play_sound(&({receiverExpr}), 1.0f)",
+                    "play" when callExpr.Arguments.Count == 1 =>
+                        $"psps_audio_play_sound(&({receiverExpr}), (float)({EmitExpr(callExpr.Arguments[0], ctx)}))",
+                    _ => "(void)0"
+                };
+            }
+
+            if (receiverType is AssetType { AssetKind: "music" })
+            {
+                return method switch
+                {
+                    "play" when callExpr.Arguments.Count == 0 =>
+                        $"psps_audio_play_music(&({receiverExpr}), 1.0f)",
+                    "play" when callExpr.Arguments.Count == 1 =>
+                        $"psps_audio_play_music(&({receiverExpr}), (float)({EmitExpr(callExpr.Arguments[0], ctx)}))",
+                    "stop" => "psps_audio_stop_music()",
+                    "pause" => "psps_audio_pause_music()",
+                    "resume" => "psps_audio_resume_music()",
+                    _ => "(void)0"
+                };
+            }
+
+            if (receiverType is AssetType { AssetKind: "tilemap" })
+            {
+                return method switch
+                {
+                    "draw" when callExpr.Arguments.Count == 0 =>
+                        $"psps_baked_tilemap_draw(&({receiverExpr}), vec2_make(0.0f, 0.0f))",
+                    "draw" when callExpr.Arguments.Count == 1 =>
+                        $"psps_baked_tilemap_draw(&({receiverExpr}), {EmitExpr(callExpr.Arguments[0], ctx)})",
+                    "draw_layer" when callExpr.Arguments.Count == 1 =>
+                        $"psps_baked_tilemap_draw_layer(&({receiverExpr}), (int32_t)({EmitExpr(callExpr.Arguments[0], ctx)}), vec2_make(0.0f, 0.0f))",
+                    "draw_layer" when callExpr.Arguments.Count == 2 =>
+                        $"psps_baked_tilemap_draw_layer(&({receiverExpr}), (int32_t)({EmitExpr(callExpr.Arguments[0], ctx)}), {EmitExpr(callExpr.Arguments[1], ctx)})",
+                    "get_tile" when callExpr.Arguments.Count == 3 =>
+                        $"psps_baked_tilemap_get_tile(&({receiverExpr}), (int32_t)({EmitExpr(callExpr.Arguments[0], ctx)}), (int32_t)({EmitExpr(callExpr.Arguments[1], ctx)}), (int32_t)({EmitExpr(callExpr.Arguments[2], ctx)}))",
+                    "set_tile" when callExpr.Arguments.Count == 4 =>
+                        $"psps_baked_tilemap_set_tile(&({receiverExpr}), (int32_t)({EmitExpr(callExpr.Arguments[0], ctx)}), (int32_t)({EmitExpr(callExpr.Arguments[1], ctx)}), (int32_t)({EmitExpr(callExpr.Arguments[2], ctx)}), (int32_t)({EmitExpr(callExpr.Arguments[3], ctx)}))",
+                    "is_solid" when callExpr.Arguments.Count == 2 =>
+                        $"psps_baked_tilemap_is_solid(&({receiverExpr}), (int32_t)({EmitExpr(callExpr.Arguments[0], ctx)}), (int32_t)({EmitExpr(callExpr.Arguments[1], ctx)}))",
+                    "set_solid" when callExpr.Arguments.Count == 3 =>
+                        $"psps_baked_tilemap_set_solid(&({receiverExpr}), (int32_t)({EmitExpr(callExpr.Arguments[0], ctx)}), (int32_t)({EmitExpr(callExpr.Arguments[1], ctx)}), {EmitExpr(callExpr.Arguments[2], ctx)})",
+                    "collides_rect" when callExpr.Arguments.Count == 1 =>
+                        $"psps_baked_tilemap_collides_rect(&({receiverExpr}), {EmitExpr(callExpr.Arguments[0], ctx)})",
+                    "reset" =>
+                        $"psps_baked_tilemap_reset(&({receiverExpr}))",
+                    _ => "(void)0"
                 };
             }
 
@@ -331,6 +425,15 @@ public sealed partial class CCodeGenerator
                 "psps_save_write(PSPS_SAVE_GAME_ID, PSPS_SAVE_TITLE, &g_globals, sizeof(g_globals))",
             "load_game" =>
                 "psps_save_read(PSPS_SAVE_GAME_ID, &g_globals, sizeof(g_globals))",
+
+            "play_sound" when emitted.Count == 1 =>
+                $"psps_audio_play_sound(&({emitted[0]}), 1.0f)",
+            "play_sound" when emitted.Count >= 2 =>
+                $"psps_audio_play_sound(&({emitted[0]}), (float)({emitted[1]}))",
+            "set_master_volume" when emitted.Count >= 1 =>
+                $"psps_audio_set_master_volume((float)({emitted[0]}))",
+            "stop_all_sounds" =>
+                "psps_audio_stop_all_sounds()",
 
             "button_pressed" when emitted.Count >= 1 =>
                 $"psps_input_pressed((uint32_t)({emitted[0]}))",

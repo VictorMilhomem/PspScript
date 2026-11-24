@@ -136,6 +136,20 @@ static inline bool rect_intersects(rect_t a, rect_t b) {
            (a.y < b.y + b.h) && (a.y + a.h > b.y);
 }
 
+static inline bool psps_rect_overlaps(rect_t a, rect_t b) {
+    return (a.x < b.x + b.w) && (a.x + a.w > b.x) &&
+           (a.y < b.y + b.h) && (a.y + a.h > b.y);
+}
+
+static inline bool psps_rect_contains(rect_t r, vec2_t p) {
+    return (p.x >= r.x) && (p.x <= r.x + r.w) &&
+           (p.y >= r.y) && (p.y <= r.y + r.h);
+}
+
+static inline vec2_t psps_rect_center(rect_t r) {
+    return (vec2_t){ .x = r.x + r.w * 0.5f, .y = r.y + r.h * 0.5f };
+}
+
 /* ============================================================================
  * Native PSP Color (Packed ABGR8888: 0xAABBGGRR)
  * ============================================================================ */

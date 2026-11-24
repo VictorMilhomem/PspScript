@@ -10,8 +10,12 @@ public sealed partial class CCodeGenerator
     private readonly SymbolTable _symbols;
     private readonly string? _sourceBaseDir;
     private readonly Dictionary<string, BakedTextureAsset> _bakedAssets = new(StringComparer.Ordinal);
+    private readonly List<(string CVarName, BakedTextureAsset Texture)> _texturesToUpload = [];
+    private readonly Dictionary<string, string> _bakedTexturePathToCVar = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, BakedTilemapAsset> _bakedTilemaps = new(StringComparer.Ordinal);
     private readonly CSourceWriter _writer = new();
     private int _loopCounter;
+    private int _autoTextureCounter;
 
     public CCodeGenerator(ProgramNode program, SemanticModel model, string? sourceBaseDir = null)
     {
@@ -112,6 +116,18 @@ public sealed partial class CCodeGenerator
         _writer.CloseBlock(" PspsStateId;");
         _writer.WriteLine();
 
+        foreach (var en in _symbols.Enums.Values)
+        {
+            _writer.OpenBlock($"typedef enum {en.Name}");
+            for (int i = 0; i < en.Variants.Count; i++)
+            {
+                string comma = (i + 1 < en.Variants.Count) ? "," : string.Empty;
+                _writer.WriteLine($"{en.Name}_{en.Variants[i]} = {i}{comma}");
+            }
+            _writer.CloseBlock($" {en.Name}_t;");
+            _writer.WriteLine();
+        }
+
         foreach (var st in _symbols.Structs.Values)
         {
             _writer.WriteLine($"typedef struct {st.Name} {st.Name}_t;");
@@ -163,37 +179,102 @@ public sealed partial class CCodeGenerator
             _writer.WriteLine();
         }
 
-        foreach (var asset in _symbols.Assets.Values)
+        // Pass 1: Bake explicit texture assets
+        foreach (var asset in _symbols.Assets.Values.Where(static a =>
+                     !string.Equals(a.AssetKind, "tilemap", StringComparison.Ordinal) &&
+                     !string.Equals(a.AssetKind, "sound", StringComparison.Ordinal) &&
+                     !string.Equals(a.AssetKind, "music", StringComparison.Ordinal)))
         {
-            var baked = AssetBaker.BakeTexture(asset, _sourceBaseDir);
+            var baked = AssetBaker.BakeTexture(asset, _sourceBaseDir, out string? resolvedPath);
             _bakedAssets[asset.Name] = baked;
-
-            string elemType = baked.Format == BakedPixelFormat.Abgr8888 ? "uint32_t" : "uint16_t";
-            string hexFmt = baked.Format == BakedPixelFormat.Abgr8888 ? "X8" : "X4";
-
-            _writer.WriteLine($"/* Baked Asset '{asset.Name}' ({asset.AssetKind}: \"{asset.FilePath}\", {baked.Width}x{baked.Height}, {baked.Format}) */");
-            _writer.WriteLine($"static psps_texture_t g_asset_{asset.Name};");
-            _writer.OpenBlock($"static const {elemType} g_asset_{asset.Name}_pixels[{baked.Pixels.Length}] =");
-
-            const int perLine = 12;
-            for (int i = 0; i < baked.Pixels.Length; i += perLine)
+            string cVarName = $"g_asset_{asset.Name}";
+            _texturesToUpload.Add((cVarName, baked));
+            if (resolvedPath is not null)
             {
-                int count = Math.Min(perLine, baked.Pixels.Length - i);
-                var row = new string[count];
-                for (int j = 0; j < count; j++)
-                {
-                    row[j] = $"0x{baked.Pixels[i + j].ToString(hexFmt)}u";
-                }
-                string suffix = (i + count < baked.Pixels.Length) ? "," : string.Empty;
-                _writer.WriteLine(string.Join(", ", row) + suffix);
+                _bakedTexturePathToCVar.TryAdd(resolvedPath, cVarName);
             }
 
+            EmitBakedTextureCArray(cVarName, baked, $"Baked Asset '{asset.Name}' ({asset.AssetKind}: \"{asset.FilePath}\", {baked.Width}x{baked.Height}, {baked.Format})");
+        }
+
+        // Pass 1b: Bake compile-time WAV audio assets (sound & music)
+        foreach (var asset in _symbols.Assets.Values.Where(static a =>
+                     string.Equals(a.AssetKind, "sound", StringComparison.Ordinal) ||
+                     string.Equals(a.AssetKind, "music", StringComparison.Ordinal)))
+        {
+            var bakedAudio = AudioBaker.BakeAudio(asset, _sourceBaseDir);
+            int rateHz = bakedAudio.HalfRate ? 22050 : 44100;
+            _writer.WriteLine($"/* Baked Audio '{asset.Name}' ({asset.AssetKind}: \"{asset.FilePath}\", {bakedAudio.FrameCount} frames, {bakedAudio.Channels}ch, {rateHz}Hz) */");
+            EmitInt16Array($"g_asset_{asset.Name}_pcm", bakedAudio.Samples);
+
+            _writer.OpenBlock($"static const psps_sound_t g_asset_{asset.Name} =");
+            _writer.WriteLine($".samples = g_asset_{asset.Name}_pcm,");
+            _writer.WriteLine($".frame_count = {bakedAudio.FrameCount}u,");
+            _writer.WriteLine($".channels = {bakedAudio.Channels}u,");
+            _writer.WriteLine($".half_rate = {(bakedAudio.HalfRate ? "1u" : "0u")}");
+            _writer.CloseBlock(";");
+            _writer.WriteLine();
+        }
+
+        // Pass 2: Bake compile-time Tiled (.tmx/.tmj) tilemap assets
+        foreach (var asset in _symbols.Assets.Values.Where(static a => string.Equals(a.AssetKind, "tilemap", StringComparison.Ordinal)))
+        {
+            var bakedMap = TilemapBaker.BakeTilemap(asset, _sourceBaseDir);
+            _bakedTilemaps[asset.Name] = bakedMap;
+
+            string tilesetPtrExpr = "NULL";
+            if (bakedMap.ExplicitTilesetAssetName is not null)
+            {
+                tilesetPtrExpr = $"&g_asset_{bakedMap.ExplicitTilesetAssetName}";
+            }
+            else if (bakedMap.AutoTilesetImagePath is not null)
+            {
+                if (_bakedTexturePathToCVar.TryGetValue(bakedMap.AutoTilesetImagePath, out string? existingCVar))
+                {
+                    tilesetPtrExpr = $"&{existingCVar}";
+                }
+                else
+                {
+                    string autoCVar = $"g_autobaked_tex_{++_autoTextureCounter}";
+                    var autoBaked = AssetBaker.BakeTextureFromPath(autoCVar, bakedMap.AutoTilesetImagePath, bakedMap.AutoTilesetFormat);
+                    _texturesToUpload.Add((autoCVar, autoBaked));
+                    _bakedTexturePathToCVar[bakedMap.AutoTilesetImagePath] = autoCVar;
+                    EmitBakedTextureCArray(autoCVar, autoBaked, $"Auto-baked Tileset for '{asset.Name}' ({autoBaked.Width}x{autoBaked.Height}, {autoBaked.Format})");
+                    tilesetPtrExpr = $"&{autoCVar}";
+                }
+            }
+
+            _writer.WriteLine($"/* Baked Tilemap '{asset.Name}' (\"{asset.FilePath}\", {bakedMap.Cols}x{bakedMap.Rows}, {bakedMap.TileSize}px, {bakedMap.LayerCount} layer(s), mutable: {(bakedMap.IsMutable ? "true" : "false")}) */");
+
+            EmitUInt16Array($"g_asset_{asset.Name}_layers_ro", bakedMap.Layers, isConst: true);
+            EmitUInt8Array($"g_asset_{asset.Name}_collision_ro", bakedMap.Collision, isConst: true);
+
+            string layersMutExpr = "NULL";
+            string collisionMutExpr = "NULL";
+            if (bakedMap.IsMutable)
+            {
+                _writer.WriteLine($"static uint16_t g_asset_{asset.Name}_layers_mut[{bakedMap.Layers.Length}];");
+                _writer.WriteLine($"static uint8_t  g_asset_{asset.Name}_collision_mut[{bakedMap.Collision.Length}];");
+                layersMutExpr = $"g_asset_{asset.Name}_layers_mut";
+                collisionMutExpr = $"g_asset_{asset.Name}_collision_mut";
+            }
+
+            _writer.OpenBlock($"static psps_baked_tilemap_t g_asset_{asset.Name} =");
+            _writer.WriteLine($".tileset = {tilesetPtrExpr},");
+            _writer.WriteLine($".cols = {bakedMap.Cols}u,");
+            _writer.WriteLine($".rows = {bakedMap.Rows}u,");
+            _writer.WriteLine($".tile_size = {bakedMap.TileSize}u,");
+            _writer.WriteLine($".layer_count = {bakedMap.LayerCount}u,");
+            _writer.WriteLine($".layers_mut = {layersMutExpr},");
+            _writer.WriteLine($".layers_ro = g_asset_{asset.Name}_layers_ro,");
+            _writer.WriteLine($".collision_mut = {collisionMutExpr},");
+            _writer.WriteLine($".collision_ro = g_asset_{asset.Name}_collision_ro");
             _writer.CloseBlock(";");
             _writer.WriteLine();
         }
 
         string saveTitle = _symbols.GameConfig?.Title ?? "PSPScript Game";
-        _writer.WriteLine($"#define PSPS_SAVE_GAME_ID        \"PSPS00001\"");
+        _writer.WriteLine($"#define PSPS_SAVE_GAME_ID        \"{CTypeMapper.EscapeCString(_symbols.GameId)}\"");
         _writer.WriteLine($"#define PSPS_SAVE_TITLE          \"{CTypeMapper.EscapeCString(saveTitle)}\"");
         _writer.WriteLine();
 
@@ -245,6 +326,10 @@ public sealed partial class CCodeGenerator
             string targetName = decl.Scope == MemoryScope.Global ? $"g_globals.{decl.Name}" : decl.Name;
             EmitFieldOrVarInitializer(targetName, gSym.Type, decl.Initializer, rootCtx);
         }
+        foreach (var map in _bakedTilemaps.Values.Where(static m => m.IsMutable))
+        {
+            _writer.WriteLine($"psps_baked_tilemap_reset(&g_asset_{map.Name});");
+        }
         _writer.CloseBlock();
         _writer.WriteLine();
 
@@ -256,7 +341,93 @@ public sealed partial class CCodeGenerator
 
             EmitFieldOrVarInitializer(decl.Name, gSym.Type, decl.Initializer, rootCtx);
         }
+        foreach (var map in _bakedTilemaps.Values.Where(static m => m.IsMutable))
+        {
+            _writer.WriteLine($"psps_baked_tilemap_reset(&g_asset_{map.Name});");
+        }
         _writer.CloseBlock();
+    }
+
+    private void EmitBakedTextureCArray(string cVarName, BakedTextureAsset baked, string comment)
+    {
+        string elemType = baked.Format == BakedPixelFormat.Abgr8888 ? "uint32_t" : "uint16_t";
+        string hexFmt = baked.Format == BakedPixelFormat.Abgr8888 ? "X8" : "X4";
+
+        _writer.WriteLine($"/* {comment} */");
+        _writer.WriteLine($"static psps_texture_t {cVarName};");
+        _writer.OpenBlock($"static const {elemType} {cVarName}_pixels[{baked.Pixels.Length}] =");
+
+        const int perLine = 12;
+        for (int i = 0; i < baked.Pixels.Length; i += perLine)
+        {
+            int count = Math.Min(perLine, baked.Pixels.Length - i);
+            var row = new string[count];
+            for (int j = 0; j < count; j++)
+            {
+                row[j] = $"0x{baked.Pixels[i + j].ToString(hexFmt)}u";
+            }
+            string suffix = (i + count < baked.Pixels.Length) ? "," : string.Empty;
+            _writer.WriteLine(string.Join(", ", row) + suffix);
+        }
+
+        _writer.CloseBlock(";");
+        _writer.WriteLine();
+    }
+
+    private void EmitUInt16Array(string name, ushort[] values, bool isConst)
+    {
+        string qualifier = isConst ? "static const uint16_t" : "static uint16_t";
+        _writer.OpenBlock($"{qualifier} {name}[{values.Length}] =");
+        const int perLine = 16;
+        for (int i = 0; i < values.Length; i += perLine)
+        {
+            int count = Math.Min(perLine, values.Length - i);
+            var row = new string[count];
+            for (int j = 0; j < count; j++)
+            {
+                row[j] = $"0x{values[i + j]:X4}u";
+            }
+            string suffix = (i + count < values.Length) ? "," : string.Empty;
+            _writer.WriteLine(string.Join(", ", row) + suffix);
+        }
+        _writer.CloseBlock(";");
+    }
+
+    private void EmitUInt8Array(string name, byte[] values, bool isConst)
+    {
+        string qualifier = isConst ? "static const uint8_t" : "static uint8_t";
+        _writer.OpenBlock($"{qualifier} {name}[{values.Length}] =");
+        const int perLine = 24;
+        for (int i = 0; i < values.Length; i += perLine)
+        {
+            int count = Math.Min(perLine, values.Length - i);
+            var row = new string[count];
+            for (int j = 0; j < count; j++)
+            {
+                row[j] = $"{values[i + j]}u";
+            }
+            string suffix = (i + count < values.Length) ? "," : string.Empty;
+            _writer.WriteLine(string.Join(", ", row) + suffix);
+        }
+        _writer.CloseBlock(";");
+    }
+
+    private void EmitInt16Array(string name, short[] values)
+    {
+        _writer.OpenBlock($"static const int16_t {name}[{values.Length}] =");
+        const int perLine = 16;
+        for (int i = 0; i < values.Length; i += perLine)
+        {
+            int count = Math.Min(perLine, values.Length - i);
+            var row = new string[count];
+            for (int j = 0; j < count; j++)
+            {
+                row[j] = values[i + j].ToString(System.Globalization.CultureInfo.InvariantCulture);
+            }
+            string suffix = (i + count < values.Length) ? "," : string.Empty;
+            _writer.WriteLine(string.Join(", ", row) + suffix);
+        }
+        _writer.CloseBlock(";");
     }
 
     // ========================================================================

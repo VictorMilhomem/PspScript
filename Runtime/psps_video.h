@@ -26,6 +26,22 @@ typedef struct psps_tilemap {
     uint16_t       tile_size; /* Square tile size in pixels (e.g. 8, 16, 32)     */
 } psps_tilemap_t;
 
+#define PSPS_TILE_ID_MASK 0x3FFFu
+#define PSPS_TILE_FLIP_H  0x8000u
+#define PSPS_TILE_FLIP_V  0x4000u
+
+typedef struct psps_baked_tilemap {
+    const psps_texture_t* tileset;       /* Uploaded VRAM tileset texture                  */
+    uint16_t              cols;          /* Map width in tiles                             */
+    uint16_t              rows;          /* Map height in tiles                            */
+    uint16_t              tile_size;     /* Square tile size in pixels (e.g. 8, 16, 32)    */
+    uint16_t              layer_count;   /* Number of renderable tile layers               */
+    uint16_t*             layers_mut;    /* Writable .bss [layer_count * cols * rows] or 0 */
+    const uint16_t*       layers_ro;     /* Pristine .rodata [layer_count * cols * rows]   */
+    uint8_t*              collision_mut; /* Writable .bss [cols * rows] or NULL            */
+    const uint8_t*        collision_ro;  /* Pristine .rodata [cols * rows]                 */
+} psps_baked_tilemap_t;
+
 /* Lifecycle & Frame Timing */
 bool  psps_video_init(const char* title);
 bool  psps_video_init_scaled(const char* title, int window_scale);
@@ -66,6 +82,14 @@ void psps_draw_tilemap(
     vec2_t                origin,
     psps_color_t          tint_abgr
 );
+void    psps_baked_tilemap_draw_layer(const psps_baked_tilemap_t* map, int32_t layer, vec2_t origin);
+void    psps_baked_tilemap_draw(const psps_baked_tilemap_t* map, vec2_t origin);
+int32_t psps_baked_tilemap_get_tile(const psps_baked_tilemap_t* map, int32_t layer, int32_t col, int32_t row);
+void    psps_baked_tilemap_set_tile(psps_baked_tilemap_t* map, int32_t layer, int32_t col, int32_t row, int32_t tile_id);
+bool    psps_baked_tilemap_is_solid(const psps_baked_tilemap_t* map, int32_t col, int32_t row);
+void    psps_baked_tilemap_set_solid(psps_baked_tilemap_t* map, int32_t col, int32_t row, bool solid);
+bool    psps_baked_tilemap_collides_rect(const psps_baked_tilemap_t* map, rect_t hitbox);
+void    psps_baked_tilemap_reset(psps_baked_tilemap_t* map);
 void psps_draw_rect(rect_t bounds, psps_color_t color_abgr);
 void psps_draw_rect_outline(rect_t bounds, psps_color_t color_abgr);
 
@@ -267,9 +291,14 @@ bool psps_video_init_scaled(const char* title, int window_scale) {
         return true;
     }
 
+#if defined(__PSP__)
+    /* PSP hardware framebuffer is strictly 480x272; window_scale applies to desktop previews only */
+    window_scale = 1;
+#else
     if (window_scale < 1) {
         window_scale = 1;
     }
+#endif
 
     if ((SDL_WasInit(SDL_INIT_VIDEO) & SDL_INIT_VIDEO) == 0) {
         if (SDL_InitSubSystem(SDL_INIT_VIDEO) < 0) {
@@ -662,6 +691,166 @@ void psps_draw_tilemap(
 
             SDL_RenderCopy(g_psps_video.renderer, tileset.handle, &src, &dst);
         }
+    }
+}
+
+void psps_baked_tilemap_draw_layer(const psps_baked_tilemap_t* map, int32_t layer, vec2_t origin) {
+    if (g_psps_video.renderer == NULL || map == NULL || map->tileset == NULL ||
+        !map->tileset->valid || map->tileset->handle == NULL || map->tile_size == 0) {
+        return;
+    }
+    if (layer < 0 || layer >= (int32_t)map->layer_count) {
+        return;
+    }
+
+    const uint16_t* data = (map->layers_mut != NULL) ? map->layers_mut : map->layers_ro;
+    if (data == NULL) {
+        return;
+    }
+
+    int ts = (int)map->tile_size;
+    int sheet_cols = (int)map->tileset->width / ts;
+    if (sheet_cols <= 0) {
+        return;
+    }
+
+    vec2_t cam = g_psps_video.camera_enabled ? g_psps_video.camera_pos : vec2_make(0.0f, 0.0f);
+
+    int min_col = (int)floorf((cam.x - origin.x) / (float)ts);
+    int max_col = (int)floorf((cam.x + (float)PSP_SCREEN_WIDTH - origin.x) / (float)ts) + 1;
+    int min_row = (int)floorf((cam.y - origin.y) / (float)ts);
+    int max_row = (int)floorf((cam.y + (float)PSP_SCREEN_HEIGHT - origin.y) / (float)ts) + 1;
+
+    if (min_col < 0) min_col = 0;
+    if (min_row < 0) min_row = 0;
+    if (max_col > (int)map->cols) max_col = (int)map->cols;
+    if (max_row > (int)map->rows) max_row = (int)map->rows;
+
+    SDL_SetTextureColorMod(map->tileset->handle, 255u, 255u, 255u);
+    SDL_SetTextureAlphaMod(map->tileset->handle, 255u);
+
+    size_t layer_offset = (size_t)layer * (size_t)map->cols * (size_t)map->rows;
+
+    for (int r = min_row; r < max_row; ++r) {
+        for (int c = min_col; c < max_col; ++c) {
+            uint16_t raw = data[layer_offset + (size_t)r * (size_t)map->cols + (size_t)c];
+            uint16_t tile_id = (uint16_t)(raw & PSPS_TILE_ID_MASK);
+            if (tile_id == 0u) {
+                continue;
+            }
+
+            int idx = (int)tile_id - 1;
+            SDL_Rect src = {
+                .x = (idx % sheet_cols) * ts,
+                .y = (idx / sheet_cols) * ts,
+                .w = ts,
+                .h = ts
+            };
+
+            SDL_Rect dst = {
+                .x = (int)(origin.x + (float)(c * ts) - cam.x),
+                .y = (int)(origin.y + (float)(r * ts) - cam.y),
+                .w = ts,
+                .h = ts
+            };
+
+            SDL_RendererFlip flip = SDL_FLIP_NONE;
+            if ((raw & PSPS_TILE_FLIP_H) != 0u) flip = (SDL_RendererFlip)(flip | SDL_FLIP_HORIZONTAL);
+            if ((raw & PSPS_TILE_FLIP_V) != 0u) flip = (SDL_RendererFlip)(flip | SDL_FLIP_VERTICAL);
+
+            if (flip == SDL_FLIP_NONE) {
+                SDL_RenderCopy(g_psps_video.renderer, map->tileset->handle, &src, &dst);
+            } else {
+                SDL_RenderCopyEx(g_psps_video.renderer, map->tileset->handle, &src, &dst, 0.0, NULL, flip);
+            }
+        }
+    }
+}
+
+void psps_baked_tilemap_draw(const psps_baked_tilemap_t* map, vec2_t origin) {
+    if (map == NULL) {
+        return;
+    }
+    for (int32_t layer = 0; layer < (int32_t)map->layer_count; ++layer) {
+        psps_baked_tilemap_draw_layer(map, layer, origin);
+    }
+}
+
+int32_t psps_baked_tilemap_get_tile(const psps_baked_tilemap_t* map, int32_t layer, int32_t col, int32_t row) {
+    if (map == NULL || layer < 0 || layer >= (int32_t)map->layer_count ||
+        col < 0 || col >= (int32_t)map->cols || row < 0 || row >= (int32_t)map->rows) {
+        return 0;
+    }
+    const uint16_t* data = (map->layers_mut != NULL) ? map->layers_mut : map->layers_ro;
+    if (data == NULL) {
+        return 0;
+    }
+    size_t idx = (size_t)layer * (size_t)map->cols * (size_t)map->rows +
+                 (size_t)row * (size_t)map->cols + (size_t)col;
+    return (int32_t)(data[idx] & PSPS_TILE_ID_MASK);
+}
+
+void psps_baked_tilemap_set_tile(psps_baked_tilemap_t* map, int32_t layer, int32_t col, int32_t row, int32_t tile_id) {
+    if (map == NULL || map->layers_mut == NULL ||
+        layer < 0 || layer >= (int32_t)map->layer_count ||
+        col < 0 || col >= (int32_t)map->cols || row < 0 || row >= (int32_t)map->rows) {
+        return;
+    }
+    size_t idx = (size_t)layer * (size_t)map->cols * (size_t)map->rows +
+                 (size_t)row * (size_t)map->cols + (size_t)col;
+    uint16_t clamped = (tile_id < 0) ? 0u : (uint16_t)((uint32_t)tile_id & PSPS_TILE_ID_MASK);
+    map->layers_mut[idx] = clamped;
+}
+
+bool psps_baked_tilemap_is_solid(const psps_baked_tilemap_t* map, int32_t col, int32_t row) {
+    if (map == NULL || col < 0 || col >= (int32_t)map->cols || row < 0 || row >= (int32_t)map->rows) {
+        return false;
+    }
+    const uint8_t* col_data = (map->collision_mut != NULL) ? map->collision_mut : map->collision_ro;
+    if (col_data == NULL) {
+        return false;
+    }
+    return col_data[(size_t)row * (size_t)map->cols + (size_t)col] != 0u;
+}
+
+void psps_baked_tilemap_set_solid(psps_baked_tilemap_t* map, int32_t col, int32_t row, bool solid) {
+    if (map == NULL || map->collision_mut == NULL ||
+        col < 0 || col >= (int32_t)map->cols || row < 0 || row >= (int32_t)map->rows) {
+        return;
+    }
+    map->collision_mut[(size_t)row * (size_t)map->cols + (size_t)col] = solid ? 1u : 0u;
+}
+
+bool psps_baked_tilemap_collides_rect(const psps_baked_tilemap_t* map, rect_t hitbox) {
+    if (map == NULL || map->tile_size == 0 || hitbox.w <= 0.0f || hitbox.h <= 0.0f) {
+        return false;
+    }
+    float ts = (float)map->tile_size;
+    int32_t min_col = (int32_t)floorf(hitbox.x / ts);
+    int32_t max_col = (int32_t)floorf((hitbox.x + hitbox.w - 0.001f) / ts);
+    int32_t min_row = (int32_t)floorf(hitbox.y / ts);
+    int32_t max_row = (int32_t)floorf((hitbox.y + hitbox.h - 0.001f) / ts);
+
+    for (int32_t r = min_row; r <= max_row; ++r) {
+        for (int32_t c = min_col; c <= max_col; ++c) {
+            if (psps_baked_tilemap_is_solid(map, c, r)) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+void psps_baked_tilemap_reset(psps_baked_tilemap_t* map) {
+    if (map == NULL) {
+        return;
+    }
+    size_t cell_count = (size_t)map->cols * (size_t)map->rows;
+    if (map->layers_mut != NULL && map->layers_ro != NULL && map->layer_count > 0u) {
+        memcpy(map->layers_mut, map->layers_ro, (size_t)map->layer_count * cell_count * sizeof(uint16_t));
+    }
+    if (map->collision_mut != NULL && map->collision_ro != NULL) {
+        memcpy(map->collision_mut, map->collision_ro, cell_count * sizeof(uint8_t));
     }
 }
 

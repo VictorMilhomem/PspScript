@@ -1,4 +1,4 @@
-# PSPScript (v0.1)
+# PSPScript (v0.2)
 
 A C# (.NET 10) transpiler for **PSPScript (`.psps`)**, a domain-specific game scripting language engineered for **Sony PlayStation Portable (PSP)** homebrew development. It compiles high-level, game-oriented scripts down to clean, static, zero-heap-allocation **C99** targeting **PSPSDK (`psp-gcc` + `psp-prxgen`)** and a modular STB-style **SDL2** runtime (`EBOOT.PBP` for PSP/PPSSPP, plus native Linux desktop previews).
 
@@ -63,20 +63,36 @@ See the full modular playable game in [examples/pong/main.psps](examples/pong/ma
 ## Quick Start
 
 ### Prerequisites
-- **.NET 10 SDK** (to run the PSPScript compiler)
-- **Podman** (`podman-compose` or `podman compose`) or **Docker** (to cross-compile `build/EBOOT.PBP` via `pspdev/pspdev:latest`)
+- **.NET 10 SDK** (only needed to build/install from source; the installed `pspscript` binary bundles the `.NET 10` runtime)
+- **Podman** (`podman-compose` or `podman`) or **Docker** (to cross-compile `build/EBOOT.PBP` via `pspdev/pspdev:latest`)
 - Optional: **`gcc` + `SDL2`** on Linux for instant native desktop previews
 
-### Build & Run
+### Install Globally (Self-Contained Binary)
+
+Bundle the compiler with the `.NET 10` runtime, `StdLib/`, `Runtime/`, and `Makefile` into `~/.local/share/pspscript` and link `~/.local/bin/pspscript`:
+
+```bash
+./install.sh
+```
+
+Once installed, you can run `pspscript` from **any** project directory without the `.NET` SDK:
 
 ```bash
 # 1. Full pipeline: parse, type-check, emit build/out.c, and package build/EBOOT.PBP
-dotnet run -- examples/pong/main.psps
+pspscript main.psps
 
 # 2. Fast local desktop preview on Linux (generates build/out.c and compiles build/game_desktop)
-dotnet run -- examples/pong/main.psps --c-only --desktop && ./build/game_desktop
+pspscript main.psps --c-only --desktop && ./build/game_desktop
 
 # 3. Validate syntax, types, and static RAM budget without emitting C code
+pspscript main.psps --check --dump-ast
+```
+
+### Build & Run from Source (Development)
+
+```bash
+dotnet run -- examples/pong/main.psps
+dotnet run -- examples/pong/main.psps --c-only --desktop && ./build/game_desktop
 dotnet run -- examples/pong/main.psps --check --dump-ast
 ```
 
@@ -90,18 +106,28 @@ dotnet run -- examples/pong/main.psps --check --dump-ast
 | `--desktop` | Also build native Linux preview binary (`make desktop`) |
 | `--check` | Run parser and semantic analyzer only |
 | `--dump-ast` | Print parsed declarations and resolved semantic types |
+| `--lsp` | Start the PSPScript Language Server (LSP) over stdio |
 
 ---
 
-## VS Code Extension
+## VS Code Extension & Language Server (LSP)
 
-Install the bundled `.psps` syntax highlighter, file icon, and snippets extension from [vscode-pspscript/](vscode-pspscript/README.md):
+Install the bundled `.psps` extension from [vscode-pspscript/](vscode-pspscript/README.md) for syntax highlighting, snippets, **real-time syntax & semantic diagnostics**, **context-aware autocomplete** (`.`, `import`, `ref<`, enums, structs, tilemaps, audio), and **hover signatures**:
 
 ```bash
-mkdir -p ~/.vscode/extensions && ln -sfn "$(pwd)/vscode-pspscript" ~/.vscode/extensions/pspscript-0.1.0
+# 1. Build the PSPScript compiler (embeds the `--lsp` Language Server)
+dotnet build
+
+# 2. Install the VS Code LanguageClient dependency
+cd vscode-pspscript && npm install && cd ..
+
+# 3. Symlink the extension into VS Code
+mkdir -p ~/.vscode/extensions && ln -sfn "$(pwd)/vscode-pspscript" ~/.vscode/extensions/pspscript-0.2.0
 ```
 
-Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highlighting for `.psps` files.
+Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highlighting and the Language Server on `.psps` files.
+
+> **Optional (`pspscript.serverPath`):** The extension auto-detects `bin/Release/net10.0/PspScript.dll` or `bin/Debug/net10.0/PspScript.dll` from the repository. If you move or package the extension as a `.vsix`, point `pspscript.serverPath` in VS Code `settings.json` to your `PspScript.dll` (or native `PspScript` binary).
 
 ---
 
@@ -112,12 +138,15 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 | `Ast/` | Immutable C# record AST definitions (`ProgramNode`, `TopDecl`, `Stmt`, `Expr`, `TypeRef`) |
 | `Parser/` | Parlot-based recursive-descent & precedence-climbing parser (`PspParser.cs`) + multi-file `ModuleLoader.cs` |
 | `Semantics/` | Two-pass semantic analyzer, symbol table, type checker, entry state & static RAM budget validator |
-| `CodeGen/` | Modular C99 code generator (`CSourceWriter`, `CTypeMapper`, `AssetBaker`, `Actors`, `States`, `Statements`, `Expressions`) |
-| `Runtime/` | Zero-heap STB-style C99 headers (`psps_runtime.h`, `psps_types.h`, `psps_arena.h`, `psps_video.h`, `psps_input.h`, `psps_save.h`) |
-| `StdLib/` | Bundled zero-allocation PSPScript standard library modules imported by bare name (e.g., [collision.psps](StdLib/collision.psps)) |
+| `CodeGen/` | Modular C99 code generator (`CSourceWriter`, `CTypeMapper`, `AssetBaker`, `TilemapBaker`, `AudioBaker`, `PspXmbStager`, `Actors`, `States`, `Statements`, `Expressions`) |
+| `Lsp/` | Zero-dependency JSON-RPC 2.0 Language Server (`PspScript --lsp`) for real-time diagnostics, autocomplete & hover |
+| `Runtime/` | Zero-heap STB-style C99 headers (`psps_runtime.h`, `psps_types.h`, `psps_arena.h`, `psps_video.h`, `psps_input.h`, `psps_save.h`, `psps_audio.h`) |
+| `StdLib/` | Bundled zero-allocation PSPScript standard library modules imported by bare name ([input.psps](StdLib/input.psps), [collision.psps](StdLib/collision.psps)) |
+| `tests/` | Automated `.NET 10` xUnit test suite (`tests/PspScript.Tests`) |
 | `examples/` | Modular `.psps` projects: [Pong](examples/pong/main.psps), [Sprite Demo](examples/sprite/main.psps), and [Animation Demo](examples/anim/main.psps) |
 | `docs/` | [Language Tutorial](docs/tutorial.md) & [EBNF Grammar](docs/grammar.md) |
-| `vscode-pspscript/` | VS Code syntax highlighting extension & snippets |
+| `vscode-pspscript/` | VS Code extension providing syntax highlighting, snippets, and the PSPScript LSP client |
+| `install.sh` | Self-contained single-file `linux-x64` installer bundling the `.NET 10` runtime, `StdLib/`, `Runtime/`, and `Makefile` |
 | `Makefile` & `docker-compose.yml` | Podman/PSPSDK cross-compilation (`psp-gcc` → `psp-prxgen` → `EBOOT.PBP`) and desktop preview targets |
 
 ---
@@ -126,9 +155,9 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 
 | Example | Entry Point | Showcased Features |
 | :--- | :--- | :--- |
-| **PSP Pong** | [examples/pong/main.psps](examples/pong/main.psps) | Multi-file `import`, `MainMenu` with message-driven `Button[4]` (`ButtonFocus` / `ButtonPress`), difficulty selector, `Ball[4]` pool, `PaddleBounce` messages, bitmap font HUD, `save_game` / `load_game` |
-| **Sprite Demo** | [examples/sprite/main.psps](examples/sprite/main.psps) | Compile-time baked PNGs (`Free_Chicken_House.png`, `Egg_item.png`), `sprite(...)`, tint cycling via `CycleTint` message, bobbing pooled `Egg[8]`, `temp var` normalized movement |
-| **Animation Demo** | [examples/anim/main.psps](examples/anim/main.psps) | Baked spritesheets (`Basic Charakter Spritesheet.png`, `Free Chicken Sprites.png`), 4-directional `draw_subsprite` animation with `timer` frame clocks, pooled `Chicken[6]` AI + `Startle` message, 2D camera tracking |
+| **PSP Pong** | [examples/pong/main.psps](examples/pong/main.psps) | Multi-file `import` + `import input`, compile-time baked WAV SFX (`sfx_chip`, `sfx_click`, `sfx_hit`, `sfx_score`), built-in `rect.overlaps` / `rect.center`, range `for i in 0..12`, `MainMenu` with message-driven `Button[4]`, difficulty selector, `Ball[4]` pool, `PaddleBounce` messages, bitmap font HUD, `save_game` / `load_game` |
+| **Sprite Demo** | [examples/sprite/main.psps](examples/sprite/main.psps) | Compile-time baked PNGs (`Free_Chicken_House.png`, `Egg_item.png`), `import input` + `dpad_vector()`, `sprite(...)`, tint cycling via `CycleTint` message, bobbing pooled `Egg[8]`, `temp var` normalized movement |
+| **Animation Demo** | [examples/anim/main.psps](examples/anim/main.psps) | Baked spritesheets (`Basic Charakter Spritesheet.png`, `Free Chicken Sprites.png`), `import input` + `dpad_vector()`, 4-directional `draw_subsprite` animation with `timer` frame clocks, pooled `Chicken[6]` AI + `Startle` message, 2D camera tracking |
 
 ---
 
@@ -141,7 +170,7 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 
 ## Roadmap
 
-### v0.1 (Current Release)
+### v0.1
 * [x] AST (Abstract Syntax Tree) Design
 * [x] Parser (using Parlot 2.3), Multi-File `import` Loader & Bare `StdLib` Module Resolution (`StdLib/collision.psps`)
 * [x] Two-Pass Semantic Analysis, Type Checking, Explicit `entry:` State & Static RAM Budget Validation
@@ -153,11 +182,26 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 * [x] VS Code Syntax Highlighting Extension & Snippets
 * [x] Language Tutorial & Modular Examples (`examples/pong`, `examples/sprite`, `examples/anim`)
 
-### Planned for v0.2+
-* [ ] Additional Standard Library Modules (`math`, `easing`, `tilemap`, `particles`)
-* [ ] Compile-Time Audio Asset Baker (WAV → PCM) & PSP Audio Runtime Module (`psps_audio.h`)
-* [ ] Language Server (LSP) for Real-Time VS Code Diagnostics & Autocomplete
-* [ ] Automated Unit & Integration Test Suite
+### v0.2 (Current Release)
+* [x] Bare `StdLib` Module Resolution (`import input`, `import collision`) & Project-Local Override Support
+* [x] Unified `for` Loops (`for cond { ... }` & `for i in start..end { ... }`, removing `while`) & `break` Statement
+* [x] Full Bitwise Operator Suite (`&`, `|`, `^`, `~`, `<<`, `>>` and compound assignments)
+* [x] Built-In `rect` Geometry Helpers (`overlaps`, `contains`, read-only `center`)
+* [x] Initial Standard Library Modules (`StdLib/input.psps`, `StdLib/collision.psps`) & v0.2 Examples
+* [x] First-Class `enum` Declarations & Exhaustive `match` Statements
+* [x] Compile-Time Baked Tiled Tilemaps (`DotTiled` `.tmx`/`.tmj`, multi-layer, collision & opt-in `mutable: true`)
+* [x] Compile-Time Audio Asset Baker (WAV → PCM) & PSP Audio Runtime Module (`psps_audio.h`)
+* [x] Extended `game { ... }` EBOOT/XMB Configuration (`id`, `version`, `extra_ram`, `icon`, `background`, `overlay`)
+* [x] Language Server (LSP) for Real-Time VS Code Diagnostics, Autocomplete & Hover (`PspScript --lsp`)
+* [x] Self-Contained Single-File Global Installer (`install.sh` bundling the `.NET 10` runtime)
+* [x] Automated Unit Test Suite (`tests/PspScript.Tests`)
+
+### v0.3 (Planned)
+* [ ] Compile-Time Constants (`const NAME[: type] = expr`, usable in expressions, array/pool sizes, and `match` patterns)
+* [ ] Ternary Conditional Expression (`cond ? a : b`)
+* [ ] Loop Ergonomics (`continue` statement & inclusive ranges `0..=10`)
+* [ ] Field Type Inference & Typed Game Constructors (`vec2(x, y)`, `vec3(x, y, z)`, `rect(x, y, w, h)`)
+* [ ] Enhanced `match` (multi-pattern `|` arms, `const` patterns, and `match` expressions)
 
 ---
 

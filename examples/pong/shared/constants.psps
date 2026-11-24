@@ -1,4 +1,11 @@
-// Shared messages, button bitmasks, and game state variables
+// Shared messages, standard input constants, baked SFX, and game state variables
+import input
+
+// Compile-time baked WAV sound effects (normalized to mono 44.1 kHz PCM)
+asset sfx_chip  = sound("../assets/SFX/Chip.wav")
+asset sfx_click = sound("../assets/SFX/Click.wav")
+asset sfx_hit   = sound("../assets/SFX/Hit.wav")
+asset sfx_score = sound("../assets/SFX/Score.wav")
 
 message PaddleBounce {
     dir_x: f32,
@@ -18,13 +25,6 @@ global var player_wins: int = 0
 global var last_winner_is_player: bool = true
 global var save_loaded: bool = false
 global var cpu_difficulty: int = 1 // 0 = EASY, 1 = NORMAL, 2 = HARD
-
-// Input bitmasks matching Runtime/psps_input.h (psps_button_t)
-global var BTN_CROSS: int = 1
-global var BTN_CIRCLE: int = 2
-global var BTN_UP: int = 16
-global var BTN_DOWN: int = 32
-global var BTN_START: int = 1024
 
 // Level-scoped match state (reset automatically on 'goto')
 level var player_score: int = 0
