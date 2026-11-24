@@ -93,15 +93,24 @@ dotnet run -- examples/pong/main.psps --check --dump-ast
 
 ---
 
-## VS Code Extension
+## VS Code Extension & Language Server (LSP)
 
-Install the bundled `.psps` syntax highlighter, file icon, and snippets extension from [vscode-pspscript/](vscode-pspscript/README.md):
+Install the bundled `.psps` extension from [vscode-pspscript/](vscode-pspscript/README.md) for syntax highlighting, snippets, **real-time syntax & semantic diagnostics**, **context-aware autocomplete** (`.`, `import`, `ref<`, enums, structs, tilemaps, audio), and **hover signatures**:
 
 ```bash
-mkdir -p ~/.vscode/extensions && ln -sfn "$(pwd)/vscode-pspscript" ~/.vscode/extensions/pspscript-0.1.0
+# 1. Build the PSPScript compiler (embeds the `--lsp` Language Server)
+dotnet build
+
+# 2. Install the VS Code LanguageClient dependency
+cd vscode-pspscript && npm install && cd ..
+
+# 3. Symlink the extension into VS Code
+mkdir -p ~/.vscode/extensions && ln -sfn "$(pwd)/vscode-pspscript" ~/.vscode/extensions/pspscript-0.2.0
 ```
 
-Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highlighting for `.psps` files.
+Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highlighting and the Language Server on `.psps` files.
+
+> **Optional (`pspscript.serverPath`):** The extension auto-detects `bin/Release/net10.0/PspScript.dll` or `bin/Debug/net10.0/PspScript.dll` from the repository. If you move or package the extension as a `.vsix`, point `pspscript.serverPath` in VS Code `settings.json` to your `PspScript.dll` (or native `PspScript` binary).
 
 ---
 
@@ -112,9 +121,11 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 | `Ast/` | Immutable C# record AST definitions (`ProgramNode`, `TopDecl`, `Stmt`, `Expr`, `TypeRef`) |
 | `Parser/` | Parlot-based recursive-descent & precedence-climbing parser (`PspParser.cs`) + multi-file `ModuleLoader.cs` |
 | `Semantics/` | Two-pass semantic analyzer, symbol table, type checker, entry state & static RAM budget validator |
-| `CodeGen/` | Modular C99 code generator (`CSourceWriter`, `CTypeMapper`, `AssetBaker`, `Actors`, `States`, `Statements`, `Expressions`) |
+| `CodeGen/` | Modular C99 code generator (`CSourceWriter`, `CTypeMapper`, `AssetBaker`, `TilemapBaker`, `AudioBaker`, `PspXmbStager`, `Actors`, `States`, `Statements`, `Expressions`) |
+| `Lsp/` | Zero-dependency JSON-RPC 2.0 Language Server (`PspScript --lsp`) for real-time diagnostics, autocomplete & hover |
 | `Runtime/` | Zero-heap STB-style C99 headers (`psps_runtime.h`, `psps_types.h`, `psps_arena.h`, `psps_video.h`, `psps_input.h`, `psps_save.h`, `psps_audio.h`) |
 | `StdLib/` | Bundled zero-allocation PSPScript standard library modules imported by bare name ([input.psps](StdLib/input.psps), [collision.psps](StdLib/collision.psps)) |
+| `tests/` | Automated `.NET 10` xUnit test suite (`tests/PspScript.Tests`) |
 | `examples/` | Modular `.psps` projects: [Pong](examples/pong/main.psps), [Sprite Demo](examples/sprite/main.psps), and [Animation Demo](examples/anim/main.psps) |
 | `docs/` | [Language Tutorial](docs/tutorial.md) & [EBNF Grammar](docs/grammar.md) |
 | `vscode-pspscript/` | VS Code syntax highlighting extension & snippets |
@@ -161,8 +172,9 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 * [x] First-Class `enum` Declarations & Exhaustive `match` Statements
 * [x] Compile-Time Baked Tiled Tilemaps (`DotTiled` `.tmx`/`.tmj`, multi-layer, collision & opt-in `mutable: true`)
 * [x] Compile-Time Audio Asset Baker (WAV → PCM) & PSP Audio Runtime Module (`psps_audio.h`)
+* [x] Language Server (LSP) for Real-Time VS Code Diagnostics, Autocomplete & Hover (`PspScript --lsp`)
+* [x] Automated Unit Test Suite (`tests/PspScript.Tests`)
 * [ ] Additional Standard Library Modules
-* [ ] Language Server (LSP) for Real-Time VS Code Diagnostics & Autocomplete
 
 ---
 

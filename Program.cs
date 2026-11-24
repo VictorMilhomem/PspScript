@@ -1,8 +1,14 @@
 using System.Diagnostics;
 using PspScript.Ast;
 using PspScript.CodeGen;
+using PspScript.Lsp;
 using PspScript.Parsing;
 using PspScript.Semantics;
+
+if (args.Contains("--lsp"))
+{
+    return await PspLanguageServer.RunStdioAsync();
+}
 
 if (args.Length == 0 || args.Contains("-h") || args.Contains("--help"))
 {
@@ -236,6 +242,7 @@ static void PrintUsage()
       --desktop                 Also build native desktop preview executable (make desktop)
       --check                   Run syntax and semantic analysis only (no code generation)
       --dump-ast                Print parsed declarations and resolved semantic types
+      --lsp                     Start the PSPScript Language Server (LSP) over stdio
       -h, --help                Display this help message
 
     Examples:
