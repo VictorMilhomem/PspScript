@@ -20,6 +20,9 @@
 
   <ItemGroup>
     <None Include="StdLib/**/*.psps" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Runtime/**/*.h" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Makefile" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="docker-compose.yml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

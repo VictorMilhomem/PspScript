@@ -3,6 +3,8 @@
 # ==============================================================================
 
 BUILD_DIR        ?= build
+RUNTIME_DIR      ?= Runtime
+RUNTIME_PARENT   := $(patsubst %/,%,$(dir $(abspath $(RUNTIME_DIR))))
 SRC              ?= $(BUILD_DIR)/out.c
 OBJ              := $(BUILD_DIR)/out.o
 ELF              := $(BUILD_DIR)/out.elf
@@ -43,7 +45,8 @@ CFLAGS           := -std=c99 -O2 -G0 -Wall -Wextra \
                     -D__PSP__ \
                     -D_PSP_FW_VERSION=$(PSP_FW_VERSION) \
                     -I. \
-                    -IRuntime \
+                    -I$(RUNTIME_DIR) \
+                    -I$(RUNTIME_PARENT) \
                     $(PSP_SDL2_CFLAGS) \
                     -I$(PSPDEV)/psp/include \
                     -I$(PSPDEV)/psp/include/SDL2 \
@@ -63,7 +66,7 @@ LIBS             := $(if $(PSP_SDL2_LIBS),$(PSP_SDL2_LIBS),-lSDL2main -lSDL2) \
 # Host desktop compiler settings for fast local testing (`make desktop`)
 HOST_CC          ?= gcc
 HOST_BIN         := $(BUILD_DIR)/game_desktop
-HOST_CFLAGS      := -std=c99 -O2 -Wall -Wextra -I. -IRuntime $(shell pkg-config --cflags sdl2 2>/dev/null)
+HOST_CFLAGS      := -std=c99 -O2 -Wall -Wextra -I. -I$(RUNTIME_DIR) -I$(RUNTIME_PARENT) $(shell pkg-config --cflags sdl2 2>/dev/null)
 HOST_LIBS        := $(shell pkg-config --libs sdl2 2>/dev/null || echo -lSDL2) -lm
 
 .PHONY: all psp desktop clean

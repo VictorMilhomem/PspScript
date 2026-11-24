@@ -63,20 +63,36 @@ See the full modular playable game in [examples/pong/main.psps](examples/pong/ma
 ## Quick Start
 
 ### Prerequisites
-- **.NET 10 SDK** (to run the PSPScript compiler)
-- **Podman** (`podman-compose` or `podman compose`) or **Docker** (to cross-compile `build/EBOOT.PBP` via `pspdev/pspdev:latest`)
+- **.NET 10 SDK** (only needed to build/install from source; the installed `pspscript` binary bundles the `.NET 10` runtime)
+- **Podman** (`podman-compose` or `podman`) or **Docker** (to cross-compile `build/EBOOT.PBP` via `pspdev/pspdev:latest`)
 - Optional: **`gcc` + `SDL2`** on Linux for instant native desktop previews
 
-### Build & Run
+### Install Globally (Self-Contained Binary)
+
+Bundle the compiler with the `.NET 10` runtime, `StdLib/`, `Runtime/`, and `Makefile` into `~/.local/share/pspscript` and link `~/.local/bin/pspscript`:
+
+```bash
+./install.sh
+```
+
+Once installed, you can run `pspscript` from **any** project directory without the `.NET` SDK:
 
 ```bash
 # 1. Full pipeline: parse, type-check, emit build/out.c, and package build/EBOOT.PBP
-dotnet run -- examples/pong/main.psps
+pspscript main.psps
 
 # 2. Fast local desktop preview on Linux (generates build/out.c and compiles build/game_desktop)
-dotnet run -- examples/pong/main.psps --c-only --desktop && ./build/game_desktop
+pspscript main.psps --c-only --desktop && ./build/game_desktop
 
 # 3. Validate syntax, types, and static RAM budget without emitting C code
+pspscript main.psps --check --dump-ast
+```
+
+### Build & Run from Source (Development)
+
+```bash
+dotnet run -- examples/pong/main.psps
+dotnet run -- examples/pong/main.psps --c-only --desktop && ./build/game_desktop
 dotnet run -- examples/pong/main.psps --check --dump-ast
 ```
 

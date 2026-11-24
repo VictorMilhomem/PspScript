@@ -164,7 +164,7 @@ Console.WriteLine($"      Emitted {cSource.Length:N0} bytes of static C99 to '{o
 if (buildDesktop)
 {
     Console.WriteLine("[Desktop] Building native Linux preview binary (make desktop)...");
-    int desktopExit = RunProcess("make", "desktop");
+    int desktopExit = RunDesktopBuild();
     if (desktopExit != 0)
     {
         Console.Error.WriteLine($"Error: Desktop build failed with exit code {desktopExit}.");
@@ -231,6 +231,7 @@ static void PrintUsage()
     PSPScript Compiler - Transpiles PSPScript (.psps) to Static C99 & PSP EBOOT.PBP
 
     Usage:
+      pspscript <input.psps> [options]
       dotnet run -- <input.psps> [options]
 
     Arguments:
@@ -246,9 +247,9 @@ static void PrintUsage()
       -h, --help                Display this help message
 
     Examples:
-      dotnet run -- examples/pong/main.psps
-      dotnet run -- examples/pong/main.psps --c-only --desktop
-      dotnet run -- examples/pong/main.psps --check --dump-ast
+      pspscript examples/pong/main.psps
+      pspscript examples/pong/main.psps --c-only --desktop
+      pspscript examples/pong/main.psps --check --dump-ast
     """);
 }
 
@@ -322,25 +323,97 @@ static void PrintAstSummary(ProgramNode program, SemanticModel model)
     }
 }
 
+static int RunDesktopBuild()
+{
+    if (File.Exists("Makefile"))
+    {
+        return RunProcess("make", ["desktop"]);
+    }
+
+    string installDir = AppContext.BaseDirectory;
+    string bundledMakefile = Path.Combine(installDir, "Makefile");
+    string bundledRuntime = Path.Combine(installDir, "Runtime");
+
+    if (!File.Exists(bundledMakefile) || !Directory.Exists(bundledRuntime))
+    {
+        Console.Error.WriteLine($"Error: Could not find 'Makefile' in the current directory or in '{installDir}'.");
+        return 1;
+    }
+
+    return RunProcess("make", ["-f", bundledMakefile, $"RUNTIME_DIR={bundledRuntime}", "desktop"]);
+}
+
 static int RunComposeBuild(IDictionary<string, string> env)
 {
-    if (IsCommandAvailable("podman-compose"))
+    // In-repo / local compose workflow when docker-compose.yml exists in CWD
+    if (File.Exists("docker-compose.yml"))
     {
-        return RunProcess("podman-compose", "run --rm psp-builder", env);
+        if (IsCommandAvailable("podman-compose"))
+        {
+            return RunProcess("podman-compose", ["run", "--rm", "psp-builder"], env);
+        }
+
+        if (IsCommandAvailable("podman"))
+        {
+            return RunProcess("podman", ["compose", "run", "--rm", "psp-builder"], env);
+        }
+
+        if (IsCommandAvailable("docker"))
+        {
+            return RunProcess("docker", ["compose", "run", "--rm", "psp-builder"], env);
+        }
+
+        Console.Error.WriteLine("Error: Neither 'podman-compose', 'podman', nor 'docker' was found in PATH.");
+        return 1;
     }
 
-    if (IsCommandAvailable("podman"))
+    // Global CLI workflow from any external project directory: mount bundled Makefile + Runtime read-only
+    string? containerCmd = IsCommandAvailable("podman") ? "podman"
+                         : IsCommandAvailable("docker") ? "docker"
+                         : null;
+    if (containerCmd is null)
     {
-        return RunProcess("podman", "compose run --rm psp-builder", env);
+        Console.Error.WriteLine("Error: Neither 'podman' nor 'docker' was found in PATH.");
+        return 1;
     }
 
-    if (IsCommandAvailable("docker"))
+    string installDir = AppContext.BaseDirectory;
+    string bundledMakefile = Path.Combine(installDir, "Makefile");
+    string bundledRuntime = Path.Combine(installDir, "Runtime");
+    if (!File.Exists(bundledMakefile) || !Directory.Exists(bundledRuntime))
     {
-        return RunProcess("docker", "compose run --rm psp-builder", env);
+        Console.Error.WriteLine($"Error: Bundled PSP build assets ('Makefile' and 'Runtime/') not found in '{installDir}'.");
+        return 1;
     }
 
-    Console.Error.WriteLine("Error: Neither 'podman-compose', 'podman', nor 'docker' was found in PATH.");
-    return 1;
+    string cwd = Directory.GetCurrentDirectory();
+    var args = new List<string>
+    {
+        "run", "--rm",
+        "-w", "/src",
+        "-v", $"{cwd}:/src:Z",
+        "-v", $"{bundledRuntime}:/opt/pspscript/Runtime:ro,Z",
+        "-v", $"{bundledMakefile}:/opt/pspscript/Makefile:ro,Z"
+    };
+
+    foreach (var (key, value) in env)
+    {
+        args.Add("-e");
+        args.Add($"{key}={value}");
+    }
+
+    args.Add("docker.io/pspdev/pspdev:latest");
+    args.Add("sh");
+    args.Add("-c");
+    args.Add(
+        "PSPDEV_DIR=\"$(psp-config --pspdev-path)\"; " +
+        "if [ ! -f \"${PSPDEV_DIR}/psp/include/SDL2/SDL.h\" ]; then " +
+        "echo 'Installing PSP SDL2 via psp-pacman...'; " +
+        "psp-pacman -Sy --noconfirm sdl2; " +
+        "fi; " +
+        "make -f /opt/pspscript/Makefile -C /src RUNTIME_DIR=/opt/pspscript/Runtime && chmod -R a+rwX /src/build");
+
+    return RunProcess(containerCmd, args);
 }
 
 static bool IsCommandAvailable(string binaryName)
@@ -359,15 +432,19 @@ static bool IsCommandAvailable(string binaryName)
     return false;
 }
 
-static int RunProcess(string fileName, string arguments, IDictionary<string, string>? extraEnv = null)
+static int RunProcess(string fileName, IEnumerable<string> arguments, IDictionary<string, string>? extraEnv = null)
 {
     var psi = new ProcessStartInfo
     {
         FileName = fileName,
-        Arguments = arguments,
         WorkingDirectory = Directory.GetCurrentDirectory(),
         UseShellExecute = false
     };
+
+    foreach (string arg in arguments)
+    {
+        psi.ArgumentList.Add(arg);
+    }
 
     if (extraEnv is not null)
     {
