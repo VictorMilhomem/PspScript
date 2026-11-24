@@ -161,9 +161,8 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 * [x] First-Class `enum` Declarations & Exhaustive `match` Statements
 * [x] Compile-Time Baked Tiled Tilemaps (`DotTiled` `.tmx`/`.tmj`, multi-layer, collision & opt-in `mutable: true`)
 * [x] Compile-Time Audio Asset Baker (WAV → PCM) & PSP Audio Runtime Module (`psps_audio.h`)
-* [ ] Additional Standard Library Modules (`math`, `easing`, `tilemap`, `particles`)
+* [ ] Additional Standard Library Modules
 * [ ] Language Server (LSP) for Real-Time VS Code Diagnostics & Autocomplete
-* [ ] Automated Unit & Integration Test Suite
 
 ---
 
