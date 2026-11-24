@@ -73,6 +73,11 @@ Bundle the compiler with the `.NET 10` runtime, `StdLib/`, `Runtime/`, and `Make
 
 ```bash
 ./install.sh
+
+# Later, after pulling or editing the compiler, atomically update the installed binary:
+./update.sh            # Rebuild from current working tree
+./update.sh --pull     # git pull --ff-only, then rebuild & swap
+./update.sh --test     # Run xUnit test suite before updating
 ```
 
 Once installed, you can run `pspscript` from **any** project directory without the `.NET` SDK:
@@ -146,7 +151,7 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 | `examples/` | Modular `.psps` projects: [Pong](examples/pong/main.psps), [Sprite Demo](examples/sprite/main.psps), and [Animation Demo](examples/anim/main.psps) |
 | `docs/` | [Language Tutorial](docs/tutorial.md) & [EBNF Grammar](docs/grammar.md) |
 | `vscode-pspscript/` | VS Code extension providing syntax highlighting, snippets, and the PSPScript LSP client |
-| `install.sh` | Self-contained single-file `linux-x64` installer bundling the `.NET 10` runtime, `StdLib/`, `Runtime/`, and `Makefile` |
+| `install.sh` & `update.sh` | Self-contained single-file `linux-x64` installer & atomic updater bundling the `.NET 10` runtime, `StdLib/`, `Runtime/`, and `Makefile` |
 | `Makefile` & `docker-compose.yml` | Podman/PSPSDK cross-compilation (`psp-gcc` → `psp-prxgen` → `EBOOT.PBP`) and desktop preview targets |
 
 ---
