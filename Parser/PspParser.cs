@@ -31,10 +31,273 @@ public static class PspParser
     
     public static readonly Parser<ProgramNode> CompiledProgramParser = BuildProgramParser();
   
-    public static bool TryParse(string source, out ProgramNode? program, out ParseError? error)
+    public static bool TryParse(string source, out ProgramNode? program, out ParseError? error, string? filePath = null)
     {
-        return CompiledProgramParser.TryParse(source, out program, out error);
+        bool ok = CompiledProgramParser.TryParse(source, out program, out error);
+        if (ok && program is not null && !string.IsNullOrEmpty(filePath))
+        {
+            program = StampFilePath(program, filePath);
+        }
+        return ok;
     }
+
+    public static ProgramNode StampFilePath(ProgramNode program, string filePath)
+    {
+        return (ProgramNode)StampNode(program, filePath);
+    }
+
+    private static AstNode StampNode(AstNode node, string filePath)
+    {
+        var span = node.Span with { FilePath = filePath };
+        return node switch
+        {
+            ProgramNode p => p with
+            {
+                Span = span,
+                Declarations = p.Declarations.Select(d => (TopDecl)StampNode(d, filePath)).ToList()
+            },
+            AssetDecl a => a with
+            {
+                Span = span,
+                Options = a.Options.Select(o => (NamedArg)StampNode(o, filePath)).ToList()
+            },
+            MessageDecl m => m with
+            {
+                Span = span,
+                Fields = m.Fields.Select(f => (FieldDecl)StampNode(f, filePath)).ToList()
+            },
+            StructDecl s => s with
+            {
+                Span = span,
+                Fields = s.Fields.Select(f => (FieldDecl)StampNode(f, filePath)).ToList()
+            },
+            ActorDecl act => act with
+            {
+                Span = span,
+                Fields = act.Fields.Select(f => (FieldDecl)StampNode(f, filePath)).ToList(),
+                Hooks = act.Hooks.Select(h => (LifecycleHook)StampNode(h, filePath)).ToList(),
+                Handlers = act.Handlers.Select(h => (MessageHandler)StampNode(h, filePath)).ToList(),
+                Methods = act.Methods.Select(fn => (FuncDecl)StampNode(fn, filePath)).ToList()
+            },
+            StateDecl st => st with
+            {
+                Span = span,
+                Fields = st.Fields.Select(f => (FieldDecl)StampNode(f, filePath)).ToList(),
+                Hooks = st.Hooks.Select(h => (LifecycleHook)StampNode(h, filePath)).ToList(),
+                Handlers = st.Handlers.Select(h => (MessageHandler)StampNode(h, filePath)).ToList(),
+                Methods = st.Methods.Select(fn => (FuncDecl)StampNode(fn, filePath)).ToList()
+            },
+            GlobalVarDecl g => g with
+            {
+                Span = span,
+                Explicittype = g.Explicittype is not null ? (TypeRef)StampNode(g.Explicittype, filePath) : null,
+                Initializer = g.Initializer is not null ? (Expr)StampNode(g.Initializer, filePath) : null
+            },
+            FuncDecl fn => fn with
+            {
+                Span = span,
+                Parameters = fn.Parameters.Select(p => (ParamDecl)StampNode(p, filePath)).ToList(),
+                ReturnType = (TypeRef)StampNode(fn.ReturnType, filePath),
+                Body = (BlockStmt)StampNode(fn.Body, filePath)
+            },
+            ParamDecl pd => pd with
+            {
+                Span = span,
+                Type = (TypeRef)StampNode(pd.Type, filePath)
+            },
+            FieldDecl fd => fd with
+            {
+                Span = span,
+                Type = (TypeRef)StampNode(fd.Type, filePath),
+                DefaultValue = fd.DefaultValue is not null ? (Expr)StampNode(fd.DefaultValue, filePath) : null
+            },
+            LifecycleHook lh => lh with
+            {
+                Span = span,
+                Parameters = lh.Parameters.Select(p => (ParamDecl)StampNode(p, filePath)).ToList(),
+                Body = (BlockStmt)StampNode(lh.Body, filePath)
+            },
+            MessageHandler mh => mh with
+            {
+                Span = span,
+                Body = (BlockStmt)StampNode(mh.Body, filePath)
+            },
+            NamedArg na => na with
+            {
+                Span = span,
+                Value = (Expr)StampNode(na.Value, filePath)
+            },
+            FixedArrayTypeRef fa => fa with
+            {
+                Span = span,
+                ElementType = (TypeRef)StampNode(fa.ElementType, filePath)
+            },
+            BlockStmt blk => blk with
+            {
+                Span = span,
+                Statements = blk.Statements.Select(s => (Stmt)StampNode(s, filePath)).ToList()
+            },
+            LocalVarStmt lv => lv with
+            {
+                Span = span,
+                ExplicitType = lv.ExplicitType is not null ? (TypeRef)StampNode(lv.ExplicitType, filePath) : null,
+                Initializer = lv.Initializer is not null ? (Expr)StampNode(lv.Initializer, filePath) : null
+            },
+            AssignStmt asg => asg with
+            {
+                Span = span,
+                Target = (Expr)StampNode(asg.Target, filePath),
+                Value = (Expr)StampNode(asg.Value, filePath)
+            },
+            IfStmt ifs => ifs with
+            {
+                Span = span,
+                Condition = (Expr)StampNode(ifs.Condition, filePath),
+                ThenBranch = (BlockStmt)StampNode(ifs.ThenBranch, filePath),
+                ElseBranch = ifs.ElseBranch is not null ? (Stmt)StampNode(ifs.ElseBranch, filePath) : null
+            },
+            MatchStmt ms => ms with
+            {
+                Span = span,
+                Scrutinee = (Expr)StampNode(ms.Scrutinee, filePath),
+                Arms = ms.Arms.Select(a => (MatchArm)StampNode(a, filePath)).ToList()
+            },
+            MatchArm ma => ma with
+            {
+                Span = span,
+                Pattern = (MatchPattern)StampNode(ma.Pattern, filePath),
+                Body = (Stmt)StampNode(ma.Body, filePath)
+            },
+            ForStmt fs => fs with
+            {
+                Span = span,
+                Condition = (Expr)StampNode(fs.Condition, filePath),
+                Body = (BlockStmt)StampNode(fs.Body, filePath)
+            },
+            ForRangeStmt fr => fr with
+            {
+                Span = span,
+                Start = (Expr)StampNode(fr.Start, filePath),
+                End = (Expr)StampNode(fr.End, filePath),
+                Body = (BlockStmt)StampNode(fr.Body, filePath)
+            },
+            ForEachStmt fe => fe with
+            {
+                Span = span,
+                Body = (BlockStmt)StampNode(fe.Body, filePath)
+            },
+            ReturnStmt rs => rs with
+            {
+                Span = span,
+                Value = rs.Value is not null ? (Expr)StampNode(rs.Value, filePath) : null
+            },
+            SendStmt snd => snd with
+            {
+                Span = span,
+                Target = (Expr)StampNode(snd.Target, filePath),
+                Arguments = snd.Arguments.Select(a => (NamedArg)StampNode(a, filePath)).ToList()
+            },
+            SpawnStmt spw => spw with
+            {
+                Span = span,
+                Initializers = spw.Initializers.Select(a => (NamedArg)StampNode(a, filePath)).ToList()
+            },
+            DestroyStmt dst => dst with
+            {
+                Span = span,
+                Target = (Expr)StampNode(dst.Target, filePath)
+            },
+            ExprStmt es => es with
+            {
+                Span = span,
+                Expression = (Expr)StampNode(es.Expression, filePath)
+            },
+            VecLiteralExpr vl => vl with
+            {
+                Span = span,
+                Components = vl.Components.Select(c => (Expr)StampNode(c, filePath)).ToList()
+            },
+            UnaryExpr ue => ue with
+            {
+                Span = span,
+                Operand = (Expr)StampNode(ue.Operand, filePath)
+            },
+            BinaryExpr be => be with
+            {
+                Span = span,
+                Left = (Expr)StampNode(be.Left, filePath),
+                Right = (Expr)StampNode(be.Right, filePath)
+            },
+            CallExpr ce => ce with
+            {
+                Span = span,
+                Callee = (Expr)StampNode(ce.Callee, filePath),
+                Arguments = ce.Arguments.Select(a => (Expr)StampNode(a, filePath)).ToList()
+            },
+            FieldAccessExpr fae => fae with
+            {
+                Span = span,
+                Target = (Expr)StampNode(fae.Target, filePath)
+            },
+            IndexAccessExpr iae => iae with
+            {
+                Span = span,
+                Target = (Expr)StampNode(iae.Target, filePath),
+                Index = (Expr)StampNode(iae.Index, filePath)
+            },
+            _ => node with { Span = span }
+        };
+    }
+
+    private sealed class SpanTrackingParser<T> : Parser<T> where T : AstNode
+    {
+        private readonly Parser<T> _inner;
+
+        public SpanTrackingParser(Parser<T> inner)
+        {
+            _inner = inner;
+        }
+
+        public override bool Parse(ParseContext context, ref ParseResult<T> result)
+        {
+            context.SkipWhiteSpace();
+            var start = context.Scanner.Cursor.Position;
+            if (!_inner.Parse(context, ref result))
+                return false;
+
+            var end = context.Scanner.Cursor.Position;
+            int len = ComputeSpanLength(context.Scanner.Buffer, start.Offset, end.Offset, start.Line, end.Line);
+            if (result.Value is not null)
+            {
+                result.Value = result.Value with { Span = new SourceSpan(start.Line, start.Column, len) };
+            }
+            return true;
+        }
+
+        private static int ComputeSpanLength(string buffer, int startOffset, int endOffset, int startLine, int endLine)
+        {
+            if (startOffset < 0 || startOffset >= buffer.Length)
+                return 1;
+
+            if (endLine == startLine && endOffset > startOffset)
+                return endOffset - startOffset;
+
+            int maxEnd = Math.Min(buffer.Length, endOffset > startOffset ? endOffset : buffer.Length);
+            int pos = startOffset;
+            while (pos < maxEnd && buffer[pos] != '\r' && buffer[pos] != '\n' && buffer[pos] != '{')
+            {
+                pos++;
+            }
+            while (pos > startOffset && char.IsWhiteSpace(buffer[pos - 1]))
+            {
+                pos--;
+            }
+            return Math.Max(1, pos - startOffset);
+        }
+    }
+
+    private static Parser<T> WithSpan<T>(Parser<T> parser) where T : AstNode =>
+        new SpanTrackingParser<T>(parser);
 
     private static Parser<string> Keyword(string word) =>
         Terms.Keyword(word, IdentifierPartChars)
@@ -88,7 +351,7 @@ public static class PspParser
                 ? new BuiltinTypeRef(name)
                 : new NamedTypeRef(name));
 
-        typeRef.Parser = OneOf(actorRefType, fixedArrayType, namedOrBuiltinType);
+        typeRef.Parser = WithSpan(OneOf(actorRefType, fixedArrayType, namedOrBuiltinType));
 
         // ====================================================================
         // Expressions & PSP Literals
@@ -166,7 +429,7 @@ public static class PspParser
             )
             .Then<Expr>(static (context, list) => new VecLiteralExpr(list));
 
-        var primaryExpr = OneOf(
+        var primaryExpr = WithSpan(OneOf(
             hexColorExpr,
             numericExpr,
             strExpr,
@@ -176,7 +439,7 @@ public static class PspParser
             vecLiteralExpr,
             Between(Terms.Char('('), expr, Terms.Char(')').ElseError("Expected ')'")),
             idExpr
-        );
+        ));
 
         // Postfix suffixes: call `(...)`, field `.x`, index `[i]`
         var callSuffix = Between(
@@ -184,19 +447,19 @@ public static class PspParser
                 Separated(Terms.Char(','), expr, min: 0),
                 Terms.Char(')').ElseError("Expected ')' after arguments")
             )
-            .Then<Func<Expr, Expr>>(static (context, args) => target => new CallExpr(target, args));
+            .Then<Func<Expr, Expr>>(static (context, args) => target => new CallExpr(target, args) { Span = target.Span });
 
         var fieldSuffix = Not(Terms.Text(".."))
             .SkipAnd(Terms.Char('.'))
             .SkipAnd(rawIdentifier.ElseError("Expected field or method name after '.'"))
-            .Then<Func<Expr, Expr>>(static (context, field) => target => new FieldAccessExpr(target, field));
+            .Then<Func<Expr, Expr>>(static (context, field) => target => new FieldAccessExpr(target, field) { Span = target.Span });
 
         var indexSuffix = Between(
                 Terms.Char('['),
                 expr,
                 Terms.Char(']').ElseError("Expected ']' after index expression")
             )
-            .Then<Func<Expr, Expr>>(static (context, idx) => target => new IndexAccessExpr(target, idx));
+            .Then<Func<Expr, Expr>>(static (context, idx) => target => new IndexAccessExpr(target, idx) { Span = target.Span });
 
         var postfixExpr = primaryExpr
             .And(ZeroOrMany(OneOf(callSuffix, fieldSuffix, indexSuffix)))
@@ -212,60 +475,60 @@ public static class PspParser
 
         // Unary operators: `-x`, `!flag`, `~mask`
         var unaryExpr = Deferred<Expr>();
-        unaryExpr.Parser = OneOf(
+        unaryExpr.Parser = WithSpan(OneOf(
             Terms.Char('-').SkipAnd(unaryExpr).Then<Expr>(static (context, operand) => new UnaryExpr(UnaryOp.Negate, operand)),
             Terms.Char('!').SkipAnd(unaryExpr).Then<Expr>(static (context, operand) => new UnaryExpr(UnaryOp.Not, operand)),
             Terms.Char('~').SkipAnd(unaryExpr).Then<Expr>(static (context, operand) => new UnaryExpr(UnaryOp.BitNot, operand)),
             postfixExpr
-        );
+        ));
 
         // Precedence climbing (highest to lowest, matching C99)
         var factorExpr = unaryExpr.LeftAssociative(
-            (Terms.Text("*"), static (context, a, b) => new BinaryExpr(a, BinaryOp.Mul, b)),
-            (Terms.Text("/"), static (context, a, b) => new BinaryExpr(a, BinaryOp.Div, b)),
-            (Terms.Text("%"), static (context, a, b) => new BinaryExpr(a, BinaryOp.Mod, b))
+            (Terms.Text("*"), static (context, a, b) => new BinaryExpr(a, BinaryOp.Mul, b) { Span = a.Span }),
+            (Terms.Text("/"), static (context, a, b) => new BinaryExpr(a, BinaryOp.Div, b) { Span = a.Span }),
+            (Terms.Text("%"), static (context, a, b) => new BinaryExpr(a, BinaryOp.Mod, b) { Span = a.Span })
         );
 
         var termExpr = factorExpr.LeftAssociative(
-            (Terms.Text("+"), static (context, a, b) => new BinaryExpr(a, BinaryOp.Add, b)),
-            (Terms.Text("-"), static (context, a, b) => new BinaryExpr(a, BinaryOp.Sub, b))
+            (Terms.Text("+"), static (context, a, b) => new BinaryExpr(a, BinaryOp.Add, b) { Span = a.Span }),
+            (Terms.Text("-"), static (context, a, b) => new BinaryExpr(a, BinaryOp.Sub, b) { Span = a.Span })
         );
 
         var shiftExpr = termExpr.LeftAssociative(
-            (Terms.Text("<<"), static (context, a, b) => new BinaryExpr(a, BinaryOp.ShiftLeft, b)),
-            (Terms.Text(">>"), static (context, a, b) => new BinaryExpr(a, BinaryOp.ShiftRight, b))
+            (Terms.Text("<<"), static (context, a, b) => new BinaryExpr(a, BinaryOp.ShiftLeft, b) { Span = a.Span }),
+            (Terms.Text(">>"), static (context, a, b) => new BinaryExpr(a, BinaryOp.ShiftRight, b) { Span = a.Span })
         );
 
         var comparisonExpr = shiftExpr.LeftAssociative(
-            (Terms.Text("<="), static (context, a, b) => new BinaryExpr(a, BinaryOp.LessEqual, b)),
-            (Terms.Text(">="), static (context, a, b) => new BinaryExpr(a, BinaryOp.GreaterEqual, b)),
-            (Terms.Text("<"),  static (context, a, b) => new BinaryExpr(a, BinaryOp.Less, b)),
-            (Terms.Text(">"),  static (context, a, b) => new BinaryExpr(a, BinaryOp.Greater, b))
+            (Terms.Text("<="), static (context, a, b) => new BinaryExpr(a, BinaryOp.LessEqual, b) { Span = a.Span }),
+            (Terms.Text(">="), static (context, a, b) => new BinaryExpr(a, BinaryOp.GreaterEqual, b) { Span = a.Span }),
+            (Terms.Text("<"),  static (context, a, b) => new BinaryExpr(a, BinaryOp.Less, b) { Span = a.Span }),
+            (Terms.Text(">"),  static (context, a, b) => new BinaryExpr(a, BinaryOp.Greater, b) { Span = a.Span })
         );
 
         var equalityExpr = comparisonExpr.LeftAssociative(
-            (Terms.Text("=="), static (context, a, b) => new BinaryExpr(a, BinaryOp.Equal, b)),
-            (Terms.Text("!="), static (context, a, b) => new BinaryExpr(a, BinaryOp.NotEqual, b))
+            (Terms.Text("=="), static (context, a, b) => new BinaryExpr(a, BinaryOp.Equal, b) { Span = a.Span }),
+            (Terms.Text("!="), static (context, a, b) => new BinaryExpr(a, BinaryOp.NotEqual, b) { Span = a.Span })
         );
 
         var bitAndExpr = equalityExpr.LeftAssociative(
-            (Not(Terms.Text("&&")).SkipAnd(Terms.Text("&")), static (context, a, b) => new BinaryExpr(a, BinaryOp.BitAnd, b))
+            (Not(Terms.Text("&&")).SkipAnd(Terms.Text("&")), static (context, a, b) => new BinaryExpr(a, BinaryOp.BitAnd, b) { Span = a.Span })
         );
 
         var bitXorExpr = bitAndExpr.LeftAssociative(
-            (Terms.Text("^"), static (context, a, b) => new BinaryExpr(a, BinaryOp.BitXor, b))
+            (Terms.Text("^"), static (context, a, b) => new BinaryExpr(a, BinaryOp.BitXor, b) { Span = a.Span })
         );
 
         var bitOrExpr = bitXorExpr.LeftAssociative(
-            (Not(Terms.Text("||")).SkipAnd(Terms.Text("|")), static (context, a, b) => new BinaryExpr(a, BinaryOp.BitOr, b))
+            (Not(Terms.Text("||")).SkipAnd(Terms.Text("|")), static (context, a, b) => new BinaryExpr(a, BinaryOp.BitOr, b) { Span = a.Span })
         );
 
         var logicAndExpr = bitOrExpr.LeftAssociative(
-            (Terms.Text("&&"), static (context, a, b) => new BinaryExpr(a, BinaryOp.LogicalAnd, b))
+            (Terms.Text("&&"), static (context, a, b) => new BinaryExpr(a, BinaryOp.LogicalAnd, b) { Span = a.Span })
         );
 
         var logicOrExpr = logicAndExpr.LeftAssociative(
-            (Terms.Text("||"), static (context, a, b) => new BinaryExpr(a, BinaryOp.LogicalOr, b))
+            (Terms.Text("||"), static (context, a, b) => new BinaryExpr(a, BinaryOp.LogicalOr, b) { Span = a.Span })
         );
 
         expr.Parser = logicOrExpr;
@@ -275,10 +538,10 @@ public static class PspParser
         // ====================================================================
 
         // amount: 25
-        var namedArg = rawIdentifier
+        var namedArg = WithSpan(rawIdentifier
             .AndSkip(Terms.Char(':'))
             .And(expr)
-            .Then(static (context, x) => new NamedArg(x.Item1, x.Item2));
+            .Then(static (context, x) => new NamedArg(x.Item1, x.Item2)));
 
         var namedArgList = Separated(Terms.Char(','), namedArg);
 
@@ -298,18 +561,18 @@ public static class PspParser
             .ThenElse<Expr?>(static (context, e) => e, null);
 
         // pos: vec2 = { 0.0, 0.0 }
-        var fieldDecl = rawIdentifier
+        var fieldDecl = WithSpan(rawIdentifier
             .AndSkip(Terms.Char(':'))
             .And(typeRef)
             .And(optionalInitializer)
             .AndSkip(ZeroOrOne(Terms.Char(',')))
-            .Then(static (context, x) => new FieldDecl(x.Item1, x.Item2, x.Item3));
+            .Then(static (context, x) => new FieldDecl(x.Item1, x.Item2, x.Item3)));
 
         // dt: f32
-        var paramDecl = identifier
+        var paramDecl = WithSpan(identifier
             .AndSkip(Terms.Char(':'))
             .And(typeRef)
-            .Then(static (context, x) => new ParamDecl(x.Item1, x.Item2));
+            .Then(static (context, x) => new ParamDecl(x.Item1, x.Item2)));
 
         var paramList = Separated(Terms.Char(','), paramDecl, min: 0);
 
@@ -320,12 +583,12 @@ public static class PspParser
         var stmt = Deferred<Stmt>();
         var blockStmt = Deferred<BlockStmt>();
 
-        blockStmt.Parser = Between(
+        blockStmt.Parser = WithSpan(Between(
                 Terms.Char('{'),
                 ZeroOrMany(stmt),
                 Terms.Char('}').ElseError("Expected '}' at the end of block")
             )
-            .Then(static (context, stmts) => new BlockStmt(stmts));
+            .Then(static (context, stmts) => new BlockStmt(stmts)));
 
         // temp? var x (: Type)? (= Expr)?
         var localVarScope = OneOf(
@@ -370,13 +633,13 @@ public static class PspParser
             .And(intLiteral)
             .Then<MatchPattern>(static (context, x) => new IntLiteralPattern(x.Item1 ? -x.Item2 : x.Item2));
 
-        var matchPattern = OneOf(wildcardPattern, enumVariantPattern, signedIntPattern);
+        var matchPattern = WithSpan(OneOf(wildcardPattern, enumVariantPattern, signedIntPattern));
 
-        var matchArm = matchPattern
+        var matchArm = WithSpan(matchPattern
             .AndSkip(Terms.Text("=>").ElseError("Expected '=>' after match pattern"))
             .And(OneOf(blockStmt.Then<Stmt>(static (context, b) => b), stmt))
             .AndSkip(ZeroOrOne(Terms.Char(',')))
-            .Then(static (context, x) => new MatchArm(x.Item1, x.Item2));
+            .Then(static (context, x) => new MatchArm(x.Item1, x.Item2)));
 
         var matchStmt = Keyword("match")
             .SkipAnd(expr)
@@ -486,7 +749,7 @@ public static class PspParser
                 ? new AssignStmt(x.Item1, x.Item2.Op, x.Item2.Value)
                 : new ExprStmt(x.Item1));
 
-        stmt.Parser = OneOf(
+        stmt.Parser = WithSpan(OneOf(
             spawnWithBinding,
             localVarStmt,
             ifStmt.Then<Stmt>(static (context, i) => i),
@@ -501,7 +764,7 @@ public static class PspParser
             destroyStmt,
             transitionStmt,
             assignOrExprStmt
-        );
+        ));
 
         // ====================================================================
         // Top-Level Declarations & Members
@@ -515,13 +778,13 @@ public static class PspParser
             Keyword("exit").Then(static (context, _) => LifecycleKind.Exit)
         );
 
-        var lifecycleHook = lifecycleKind
+        var lifecycleHook = WithSpan(lifecycleKind
             .And(Between(Terms.Char('('), paramList, Terms.Char(')')))
             .And(blockStmt)
-            .Then(static (context, x) => new LifecycleHook(x.Item1, x.Item2, x.Item3));
+            .Then(static (context, x) => new LifecycleHook(x.Item1, x.Item2, x.Item3)));
 
         // Message handler: on Hit(msg) { ... }
-        var messageHandler = Keyword("on")
+        var messageHandler = WithSpan(Keyword("on")
             .SkipAnd(identifier.ElseError("Expected message type after 'on'"))
             .And(Between(
                 Terms.Char('('),
@@ -529,10 +792,10 @@ public static class PspParser
                 Terms.Char(')')
             ))
             .And(blockStmt)
-            .Then(static (context, x) => new MessageHandler(x.Item1, x.Item2, x.Item3));
+            .Then(static (context, x) => new MessageHandler(x.Item1, x.Item2, x.Item3)));
 
         // Function / Method: fn foo(a: int) -> bool { ... }
-        var funcDecl = Keyword("fn")
+        var funcDecl = WithSpan(Keyword("fn")
             .SkipAnd(identifier.ElseError("Expected function name after 'fn'"))
             .And(Between(Terms.Char('('), paramList, Terms.Char(')')))
             .And(Terms.Text("->").SkipAnd(typeRef).Else(new BuiltinTypeRef("void")))
@@ -542,7 +805,7 @@ public static class PspParser
                 Parameters: x.Item2,
                 ReturnType: x.Item3,
                 Body: x.Item4
-            ));
+            )));
 
         // Game config: game "StarDust PSP" { ram_budget: 16MB, fps: 60 }
         var sizeOrIntConfig = Terms.Integer(NumberOptions.None)
@@ -709,7 +972,7 @@ public static class PspParser
             .SkipAnd(OneOf(stringLiteral, identifier).ElseError("Expected module name or path string after 'import'"))
             .Then<TopDecl>(static (context, path) => new ImportDecl(path));
 
-        var topDecl = OneOf(
+        var topDecl = WithSpan(OneOf(
             importDecl,
             gameConfigDecl,
             assetDecl,
@@ -720,7 +983,7 @@ public static class PspParser
             stateDecl,
             globalVarDecl,
             funcDecl.Then<TopDecl>(static (context, fn) => fn)
-        );
+        ));
 
         return ZeroOrMany(topDecl)
             .AndSkip(SkipWhiteSpace(Eof()).ElseError("Unexpected trailing tokens at end of file"))

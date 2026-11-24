@@ -1,4 +1,5 @@
 const fs = require("fs");
+const os = require("os");
 const path = require("path");
 const vscode = require("vscode");
 const { LanguageClient, TransportKind } = require("vscode-languageclient/node");
@@ -7,11 +8,26 @@ const { LanguageClient, TransportKind } = require("vscode-languageclient/node");
 let client;
 
 /**
+ * Returns the file modification timestamp in ms, or -1 if the file does not exist.
+ * @param {string} filePath
+ */
+function getMtimeMs(filePath) {
+  try {
+    return fs.statSync(filePath).mtimeMs;
+  } catch {
+    return -1;
+  }
+}
+
+/**
  * Resolves the command and arguments used to launch `PspScript --lsp`.
  * Priority:
  *  1. User setting `pspscript.serverPath` (native binary or `.dll`)
- *  2. Auto-detected `../bin/Release/net10.0/PspScript.dll` or `../bin/Debug/net10.0/PspScript.dll`
- *  3. Fallback `dotnet run --project <repo>/PspScript.csproj -- --lsp`
+ *  2. Newest binary (by mtime) among:
+ *     - `~/.local/share/pspscript/PspScript` (installed by `./install.sh` / `./update.sh`)
+ *     - `<repo>/bin/Release/net10.0/PspScript.dll`
+ *     - `<repo>/bin/Debug/net10.0/PspScript.dll`
+ *  3. Fallback `dotnet run --project <repo>/PspScript.csproj -- --lsp` or `pspscript --lsp`
  * @param {vscode.ExtensionContext} context
  */
 function resolveServerExecutable(context) {
@@ -34,14 +50,28 @@ function resolveServerExecutable(context) {
   }
 
   const repoRoot = path.resolve(extDir, "..");
+  const installedBinary = path.join(os.homedir(), ".local", "share", "pspscript", "PspScript");
   const releaseDll = path.join(repoRoot, "bin", "Release", "net10.0", "PspScript.dll");
-  if (fs.existsSync(releaseDll)) {
-    return { command: "dotnet", args: [releaseDll, "--lsp"] };
-  }
-
   const debugDll = path.join(repoRoot, "bin", "Debug", "net10.0", "PspScript.dll");
-  if (fs.existsSync(debugDll)) {
-    return { command: "dotnet", args: [debugDll, "--lsp"] };
+
+  const candidates = [
+    {
+      mtime: getMtimeMs(installedBinary),
+      exec: { command: installedBinary, args: ["--lsp"] }
+    },
+    {
+      mtime: getMtimeMs(releaseDll),
+      exec: { command: "dotnet", args: [releaseDll, "--lsp"] }
+    },
+    {
+      mtime: getMtimeMs(debugDll),
+      exec: { command: "dotnet", args: [debugDll, "--lsp"] }
+    }
+  ].filter((c) => c.mtime > 0);
+
+  if (candidates.length > 0) {
+    candidates.sort((a, b) => b.mtime - a.mtime);
+    return candidates[0].exec;
   }
 
   const csproj = path.join(repoRoot, "PspScript.csproj");

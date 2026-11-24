@@ -69,15 +69,16 @@ See the full modular playable game in [examples/pong/main.psps](examples/pong/ma
 
 ### Install Globally (Self-Contained Binary)
 
-Bundle the compiler with the `.NET 10` runtime, `StdLib/`, `Runtime/`, and `Makefile` into `~/.local/share/pspscript` and link `~/.local/bin/pspscript`:
+Bundle the compiler with the `.NET 10` runtime, `StdLib/`, `Runtime/`, and `Makefile` into `~/.local/share/pspscript`, link `~/.local/bin/pspscript`, and install/link the bundled VS Code extension (`~/.vscode/extensions/pspscript-*`):
 
 ```bash
 ./install.sh
 
-# Later, after pulling or editing the compiler, atomically update the installed binary:
-./update.sh            # Rebuild from current working tree
+# Later, after pulling or editing the compiler, atomically update the installed binary & VS Code extension:
+./update.sh            # Rebuild from current working tree & sync VS Code extension
 ./update.sh --pull     # git pull --ff-only, then rebuild & swap
 ./update.sh --test     # Run xUnit test suite before updating
+# Pass --no-vscode to either script to skip the VS Code extension step
 ```
 
 Once installed, you can run `pspscript` from **any** project directory without the `.NET` SDK:
@@ -117,7 +118,7 @@ dotnet run -- examples/pong/main.psps --check --dump-ast
 
 ## VS Code Extension & Language Server (LSP)
 
-Install the bundled `.psps` extension from [vscode-pspscript/](vscode-pspscript/README.md) for syntax highlighting, snippets, **real-time syntax & semantic diagnostics**, **context-aware autocomplete** (`.`, `import`, `ref<`, enums, structs, tilemaps, audio), and **hover signatures**:
+Running `./install.sh` or `./update.sh` installs and updates the bundled `.psps` extension ([vscode-pspscript/](vscode-pspscript/README.md)) automatically. If you prefer manual setup for syntax highlighting, snippets, **real-time syntax & semantic diagnostics**, **Go to Definition**, **Signature Help**, **Document Symbols**, **context-aware autocomplete**, and **hover signatures**:
 
 ```bash
 # 1. Build the PSPScript compiler (embeds the `--lsp` Language Server)

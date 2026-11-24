@@ -10,12 +10,22 @@ public sealed record ModuleLoadError(
     string? SourceText = null
 );
 
+public sealed record ResolvedImportInfo(
+    string SourceFilePath,
+    int Line,
+    int Column,
+    int Length,
+    string RawSpecifier,
+    string TargetFilePath
+);
+
 public sealed record ModuleLoadResult(
     bool Success,
     ProgramNode? Program,
     IReadOnlyList<string> LoadedFiles,
     IReadOnlyList<ModuleLoadError> Errors,
-    IReadOnlySet<string>? LoadedCanonicalPaths = null
+    IReadOnlySet<string>? LoadedCanonicalPaths = null,
+    IReadOnlyList<ResolvedImportInfo>? ResolvedImports = null
 );
 
 public sealed class ModuleLoader
@@ -26,6 +36,7 @@ public sealed class ModuleLoader
     private readonly List<string> _activeStack = [];
     private readonly List<TopDecl> _mergedDeclarations = [];
     private readonly List<ModuleLoadError> _errors = [];
+    private readonly List<ResolvedImportInfo> _resolvedImports = [];
 
     private ModuleLoader(IReadOnlyDictionary<string, string>? sourceOverrides = null)
     {
@@ -54,7 +65,7 @@ public sealed class ModuleLoader
 
         if (_errors.Count > 0)
         {
-            return new ModuleLoadResult(false, null, _loadedFilesInOrder, _errors, _loadedPaths);
+            return new ModuleLoadResult(false, null, _loadedFilesInOrder, _errors, _loadedPaths, _resolvedImports);
         }
 
         return new ModuleLoadResult(
@@ -62,11 +73,17 @@ public sealed class ModuleLoader
             Program: new ProgramNode(_mergedDeclarations),
             LoadedFiles: _loadedFilesInOrder,
             Errors: _errors,
-            LoadedCanonicalPaths: _loadedPaths
+            LoadedCanonicalPaths: _loadedPaths,
+            ResolvedImports: _resolvedImports
         );
     }
 
-    private void LoadFileRecursive(string canonicalPath, string displayPath, string? requestedBy)
+    private void LoadFileRecursive(
+        string canonicalPath,
+        string displayPath,
+        string? requestedBy,
+        int requestLine = 0,
+        int requestColumn = 0)
     {
         // Detect circular imports (A -> B -> A)
         int cycleStart = _activeStack.IndexOf(canonicalPath);
@@ -79,7 +96,9 @@ public sealed class ModuleLoader
 
             _errors.Add(new ModuleLoadError(
                 FilePath: requestedBy ?? displayPath,
-                Message: $"Circular import detected: {string.Join(" -> ", cycleChain)}"
+                Message: $"Circular import detected: {string.Join(" -> ", cycleChain)}",
+                Line: requestLine,
+                Column: requestColumn
             ));
             return;
         }
@@ -105,10 +124,15 @@ public sealed class ModuleLoader
             string contextMsg = requestedBy is not null
                 ? $"Imported module '{displayPath}' not found (resolved to '{canonicalPath}')."
                 : $"File not found: '{displayPath}'.";
-            _errors.Add(new ModuleLoadError(requestedBy ?? displayPath, contextMsg));
+            _errors.Add(new ModuleLoadError(
+                requestedBy ?? displayPath,
+                contextMsg,
+                Line: requestLine,
+                Column: requestColumn
+            ));
             return;
         }
-        if (!PspParser.TryParse(source, out var parsed, out var parseError) || parsed is null)
+        if (!PspParser.TryParse(source, out var parsed, out var parseError, canonicalPath) || parsed is null)
         {
             _errors.Add(new ModuleLoadError(
                 FilePath: displayPath,
@@ -132,7 +156,13 @@ public sealed class ModuleLoader
                 string rawImport = importDecl.Path.Trim();
                 if (string.IsNullOrEmpty(rawImport))
                 {
-                    _errors.Add(new ModuleLoadError(displayPath, "Import path cannot be empty."));
+                    _errors.Add(new ModuleLoadError(
+                        displayPath,
+                        "Import path cannot be empty.",
+                        Line: importDecl.Span.Line,
+                        Column: importDecl.Span.Column,
+                        SourceText: source
+                    ));
                     continue;
                 }
 
@@ -143,11 +173,32 @@ public sealed class ModuleLoader
                 var (targetFullPath, targetDisplay, notFoundMessage) = ResolveImportTarget(rawImport, normalizedRel, currentDir);
                 if (targetFullPath is null)
                 {
-                    _errors.Add(new ModuleLoadError(displayPath, notFoundMessage!));
+                    _errors.Add(new ModuleLoadError(
+                        displayPath,
+                        notFoundMessage!,
+                        Line: importDecl.Span.Line,
+                        Column: importDecl.Span.Column,
+                        SourceText: source
+                    ));
                     continue;
                 }
 
-                LoadFileRecursive(targetFullPath, targetDisplay, requestedBy: displayPath);
+                _resolvedImports.Add(new ResolvedImportInfo(
+                    SourceFilePath: canonicalPath,
+                    Line: importDecl.Span.Line,
+                    Column: importDecl.Span.Column,
+                    Length: Math.Max(1, importDecl.Span.Length),
+                    RawSpecifier: rawImport,
+                    TargetFilePath: targetFullPath
+                ));
+
+                LoadFileRecursive(
+                    targetFullPath,
+                    targetDisplay,
+                    requestedBy: displayPath,
+                    requestLine: importDecl.Span.Line,
+                    requestColumn: importDecl.Span.Column
+                );
             }
             else if (decl is AssetDecl assetDecl)
             {

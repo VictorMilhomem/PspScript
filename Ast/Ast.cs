@@ -1,5 +1,10 @@
 namespace PspScript.Ast;
-public readonly record struct SourceSpan(int Line, int Column);
+public readonly record struct SourceSpan(
+    int Line,
+    int Column,
+    int Length = 1,
+    string? FilePath = null
+);
 
 public abstract record AstNode(SourceSpan Span = default);
 

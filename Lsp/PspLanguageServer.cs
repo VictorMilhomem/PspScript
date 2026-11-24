@@ -1,18 +1,26 @@
 using System.Text.Json;
+using PspScript.Ast;
 using PspScript.Parsing;
 using PspScript.Semantics;
 
 namespace PspScript.Lsp;
 
+internal sealed record CachedDocumentAnalysis(
+    ProgramNode Program,
+    SymbolTable Symbols,
+    IReadOnlyList<ResolvedImportInfo> Imports
+);
+
 /// <summary>
 /// PSPScript Language Server implementing LSP over JSON-RPC 2.0 (stdio or in-memory streams).
-/// Provides real-time syntax &amp; semantic diagnostics, context-aware autocomplete, and hover info.
+/// Provides real-time syntax &amp; semantic diagnostics, context-aware autocomplete, hover info,
+/// go-to-definition, signature help, and hierarchical document symbols.
 /// </summary>
 public sealed class PspLanguageServer
 {
     private readonly LspTransport _transport;
     private readonly Dictionary<string, string> _openDocuments = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, SymbolTable> _cachedSymbols = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, CachedDocumentAnalysis> _cachedAnalysis = new(StringComparer.Ordinal);
     private bool _shutdownRequested;
 
     public PspLanguageServer(Stream input, Stream output)
@@ -100,6 +108,30 @@ public sealed class PspLanguageServer
                     }
                     break;
 
+                case "textDocument/definition":
+                    if (hasId)
+                    {
+                        var result = HandleDefinition(paramsProp);
+                        await _transport.SendResponseAsync(idProp, result, cancellationToken);
+                    }
+                    break;
+
+                case "textDocument/signatureHelp":
+                    if (hasId)
+                    {
+                        var result = HandleSignatureHelp(paramsProp);
+                        await _transport.SendResponseAsync(idProp, result, cancellationToken);
+                    }
+                    break;
+
+                case "textDocument/documentSymbol":
+                    if (hasId)
+                    {
+                        var result = HandleDocumentSymbol(paramsProp);
+                        await _transport.SendResponseAsync(idProp, result, cancellationToken);
+                    }
+                    break;
+
                 default:
                     if (hasId)
                     {
@@ -118,14 +150,20 @@ public sealed class PspLanguageServer
             completionProvider = new
             {
                 resolveProvider = false,
-                triggerCharacters = new[] { ".", "\"", "<" }
+                triggerCharacters = new[] { ".", "\"", "<", ":", "{" }
             },
-            hoverProvider = true
+            hoverProvider = true,
+            definitionProvider = true,
+            documentSymbolProvider = true,
+            signatureHelpProvider = new
+            {
+                triggerCharacters = new[] { "(", "," }
+            }
         },
         serverInfo = new
         {
             name = "pspscript-lsp",
-            version = "0.2.0"
+            version = "0.2.1"
         }
     };
 
@@ -163,7 +201,7 @@ public sealed class PspLanguageServer
     {
         string uri = @params.GetProperty("textDocument").GetProperty("uri").GetString() ?? string.Empty;
         _openDocuments.Remove(uri);
-        _cachedSymbols.Remove(uri);
+        _cachedAnalysis.Remove(uri);
         await _transport.SendNotificationAsync("textDocument/publishDiagnostics", new
         {
             uri,
@@ -175,35 +213,10 @@ public sealed class PspLanguageServer
     {
         var diagnostics = new List<object>();
         string? filePath = UriToLocalPath(uri);
-
-        ModuleLoadResult loadResult;
-        bool loadedViaProjectEntry = false;
         string? canonicalOpenPath = !string.IsNullOrEmpty(filePath) ? Path.GetFullPath(filePath) : null;
 
-        if (!string.IsNullOrEmpty(filePath))
-        {
-            var overrides = BuildSourceOverrides();
-            (loadResult, loadedViaProjectEntry) = ResolveProjectEntryAndLoad(filePath, overrides);
-        }
-        else
-        {
-            if (PspParser.TryParse(text, out var parsed, out var parseError) && parsed is not null)
-            {
-                loadResult = new ModuleLoadResult(true, parsed, [uri], []);
-            }
-            else
-            {
-                loadResult = new ModuleLoadResult(false, null, [], [
-                    new ModuleLoadError(
-                        uri,
-                        parseError?.Message ?? "Syntax error",
-                        parseError?.Position.Line ?? 1,
-                        parseError?.Position.Column ?? 1,
-                        text
-                    )
-                ]);
-            }
-        }
+        var overrides = BuildSourceOverrides();
+        var (loadResult, loadedViaProjectEntry) = LoadDocumentOrProject(uri, text, filePath, overrides);
 
         if (!loadResult.Success || loadResult.Program is null)
         {
@@ -218,31 +231,51 @@ public sealed class PspLanguageServer
 
                 int l = Math.Max(0, err.Line - 1);
                 int c = Math.Max(0, err.Column - 1);
+                int tokenLen = ComputeErrorTokenLength(text, l, c);
                 diagnostics.Add(new
                 {
                     range = new
                     {
                         start = new { line = l, character = c },
-                        end = new { line = l, character = c + 1 }
+                        end = new { line = l, character = c + tokenLen }
                     },
                     severity = 1, // Error
                     source = "pspscript",
                     message = err.Message
                 });
+
+                // Incomplete-line recovery: try masking the failing line with spaces so recently added
+                // declarations above/below the cursor still update the symbol cache for IDE features.
+                if (err.Line > 0)
+                {
+                    TryRecoverWithBlankedLine(uri, text, filePath, canonicalOpenPath, err.Line - 1);
+                }
             }
         }
         else
         {
-            var analysis = SemanticAnalyzer.Analyze(loadResult.Program);
+            var analysis = SemanticAnalyzer.Analyze(loadResult.Program, checkAssetPathsOnDisk: true);
             if (analysis.Model is not null)
             {
-                _cachedSymbols[uri] = analysis.Model.Symbols;
+                _cachedAnalysis[uri] = new CachedDocumentAnalysis(
+                    loadResult.Program,
+                    analysis.Model.Symbols,
+                    loadResult.ResolvedImports ?? []
+                );
             }
 
             foreach (var diag in analysis.Diagnostics)
             {
+                if (canonicalOpenPath is not null && !string.IsNullOrEmpty(diag.Span.FilePath))
+                {
+                    string diagPath = Path.GetFullPath(diag.Span.FilePath);
+                    if (!string.Equals(diagPath, canonicalOpenPath, StringComparison.Ordinal))
+                        continue;
+                }
+
                 int l = Math.Max(0, diag.Span.Line - 1);
                 int c = Math.Max(0, diag.Span.Column - 1);
+                int len = Math.Max(1, diag.Span.Length);
                 int sev = diag.Severity switch
                 {
                     DiagnosticSeverity.Warning => 2,
@@ -255,7 +288,7 @@ public sealed class PspLanguageServer
                     range = new
                     {
                         start = new { line = l, character = c },
-                        end = new { line = l, character = c + 1 }
+                        end = new { line = l, character = c + len }
                     },
                     severity = sev,
                     source = "pspscript",
@@ -271,6 +304,153 @@ public sealed class PspLanguageServer
         }, cancellationToken);
     }
 
+    private void TryRecoverWithBlankedLine(
+        string uri,
+        string text,
+        string? filePath,
+        string? canonicalOpenPath,
+        int zeroBasedErrorLine)
+    {
+        string currentText = text;
+        int lineToMask = zeroBasedErrorLine;
+
+        for (int attempt = 0; attempt < 3; attempt++)
+        {
+            string? maskedText = MaskLineWithSpaces(currentText, lineToMask);
+            if (maskedText is null)
+                return;
+
+            currentText = maskedText;
+            var overrides = BuildSourceOverrides();
+            if (canonicalOpenPath is not null)
+            {
+                overrides[canonicalOpenPath] = currentText;
+            }
+
+            var (recoveredLoad, _) = LoadDocumentOrProject(uri, currentText, filePath, overrides);
+            if (recoveredLoad.Success && recoveredLoad.Program is not null && recoveredLoad.Program.Declarations.Count > 0)
+            {
+                var analysis = SemanticAnalyzer.Analyze(recoveredLoad.Program, checkAssetPathsOnDisk: false);
+                if (analysis.Model is not null)
+                {
+                    _cachedAnalysis[uri] = new CachedDocumentAnalysis(
+                        recoveredLoad.Program,
+                        analysis.Model.Symbols,
+                        recoveredLoad.ResolvedImports ?? []
+                    );
+                }
+                return;
+            }
+
+            var nextErr = recoveredLoad.Errors.FirstOrDefault(e =>
+                canonicalOpenPath is null ||
+                string.Equals(Path.GetFullPath(e.FilePath), canonicalOpenPath, StringComparison.Ordinal));
+            if (nextErr is null || nextErr.Line <= 0 || nextErr.Line - 1 == lineToMask)
+                return;
+
+            lineToMask = nextErr.Line - 1;
+        }
+    }
+
+    private CachedDocumentAnalysis? GetOrRecoverAnalysis(string uri, string text, int cursorLine)
+    {
+        string? filePath = UriToLocalPath(uri);
+        string? canonicalPath = !string.IsNullOrEmpty(filePath) ? Path.GetFullPath(filePath) : null;
+
+        // If cursor line is currently being edited and fails to parse, try blanking cursorLine on the fly
+        string? masked = MaskLineWithSpaces(text, cursorLine);
+        if (masked is not null)
+        {
+            var overrides = BuildSourceOverrides();
+            if (canonicalPath is not null)
+            {
+                overrides[canonicalPath] = masked;
+            }
+            var (recovered, _) = LoadDocumentOrProject(uri, masked, filePath, overrides);
+            if (recovered.Success && recovered.Program is not null && recovered.Program.Declarations.Count > 0)
+            {
+                var analysis = SemanticAnalyzer.Analyze(recovered.Program, checkAssetPathsOnDisk: false);
+                if (analysis.Model is not null)
+                {
+                    var cached = new CachedDocumentAnalysis(
+                        recovered.Program,
+                        analysis.Model.Symbols,
+                        recovered.ResolvedImports ?? []
+                    );
+                    _cachedAnalysis[uri] = cached;
+                    return cached;
+                }
+            }
+        }
+
+        return _cachedAnalysis.TryGetValue(uri, out var existing) ? existing : null;
+    }
+
+    private static string? MaskLineWithSpaces(string text, int zeroBasedLine)
+    {
+        string[] lines = text.Replace("\r\n", "\n").Split('\n');
+        if (zeroBasedLine < 0 || zeroBasedLine >= lines.Length)
+            return null;
+
+        string target = lines[zeroBasedLine];
+        // Preserve any trailing '{' or '}' on that line so block balance remains intact
+        char[] chars = target.ToCharArray();
+        for (int i = 0; i < chars.Length; i++)
+        {
+            if (chars[i] != '{' && chars[i] != '}')
+            {
+                chars[i] = ' ';
+            }
+        }
+        lines[zeroBasedLine] = new string(chars);
+        return string.Join('\n', lines);
+    }
+
+    private static int ComputeErrorTokenLength(string text, int zeroBasedLine, int zeroBasedCol)
+    {
+        string[] lines = text.Replace("\r\n", "\n").Split('\n');
+        if (zeroBasedLine < 0 || zeroBasedLine >= lines.Length)
+            return 1;
+
+        string lineText = lines[zeroBasedLine];
+        if (zeroBasedCol < 0 || zeroBasedCol >= lineText.Length)
+            return 1;
+
+        int end = zeroBasedCol;
+        while (end < lineText.Length && (char.IsLetterOrDigit(lineText[end]) || lineText[end] == '_'))
+        {
+            end++;
+        }
+        return Math.Max(1, end - zeroBasedCol);
+    }
+
+    private static (ModuleLoadResult Result, bool LoadedViaProjectEntry) LoadDocumentOrProject(
+        string uri,
+        string text,
+        string? filePath,
+        IReadOnlyDictionary<string, string> overrides)
+    {
+        if (!string.IsNullOrEmpty(filePath))
+        {
+            return ResolveProjectEntryAndLoad(filePath, overrides);
+        }
+
+        if (PspParser.TryParse(text, out var parsed, out var parseError, uri) && parsed is not null)
+        {
+            return (new ModuleLoadResult(true, parsed, [uri], []), false);
+        }
+
+        return (new ModuleLoadResult(false, null, [], [
+            new ModuleLoadError(
+                uri,
+                parseError?.Message ?? "Syntax error",
+                parseError?.Position.Line ?? 1,
+                parseError?.Position.Column ?? 1,
+                text
+            )
+        ]), false);
+    }
+
     private object HandleCompletion(JsonElement @params)
     {
         string uri = @params.GetProperty("textDocument").GetProperty("uri").GetString() ?? string.Empty;
@@ -279,9 +459,17 @@ public sealed class PspLanguageServer
         int character = pos.GetProperty("character").GetInt32();
 
         string text = _openDocuments.TryGetValue(uri, out var docText) ? docText : string.Empty;
-        _cachedSymbols.TryGetValue(uri, out var symbols);
+        var cached = _cachedAnalysis.TryGetValue(uri, out var c) ? c : GetOrRecoverAnalysis(uri, text, line);
 
-        var items = LspCompletionProvider.GetCompletions(text, UriToLocalPath(uri), line, character, symbols);
+        var items = LspCompletionProvider.GetCompletions(
+            text,
+            UriToLocalPath(uri),
+            line,
+            character,
+            cached?.Symbols,
+            cached?.Program
+        );
+
         return new
         {
             isIncomplete = false,
@@ -306,8 +494,15 @@ public sealed class PspLanguageServer
         if (!_openDocuments.TryGetValue(uri, out var text))
             return null;
 
-        _cachedSymbols.TryGetValue(uri, out var symbols);
-        string? markdown = LspCompletionProvider.GetHoverMarkdown(text, line, character, symbols);
+        var cached = _cachedAnalysis.TryGetValue(uri, out var c) ? c : GetOrRecoverAnalysis(uri, text, line);
+        string? markdown = LspCompletionProvider.GetHoverMarkdown(
+            text,
+            line,
+            character,
+            cached?.Symbols,
+            cached?.Program,
+            UriToLocalPath(uri)
+        );
         if (markdown is null)
             return null;
 
@@ -319,6 +514,51 @@ public sealed class PspLanguageServer
                 value = markdown
             }
         };
+    }
+
+    private object? HandleDefinition(JsonElement @params)
+    {
+        string uri = @params.GetProperty("textDocument").GetProperty("uri").GetString() ?? string.Empty;
+        var pos = @params.GetProperty("position");
+        int line = pos.GetProperty("line").GetInt32();
+        int character = pos.GetProperty("character").GetInt32();
+
+        if (!_openDocuments.TryGetValue(uri, out var text))
+            return null;
+
+        var cached = _cachedAnalysis.TryGetValue(uri, out var c) ? c : GetOrRecoverAnalysis(uri, text, line);
+        return LspCompletionProvider.GetDefinitionLocation(
+            text,
+            uri,
+            UriToLocalPath(uri),
+            line,
+            character,
+            cached?.Symbols,
+            cached?.Program,
+            cached?.Imports
+        );
+    }
+
+    private object? HandleSignatureHelp(JsonElement @params)
+    {
+        string uri = @params.GetProperty("textDocument").GetProperty("uri").GetString() ?? string.Empty;
+        var pos = @params.GetProperty("position");
+        int line = pos.GetProperty("line").GetInt32();
+        int character = pos.GetProperty("character").GetInt32();
+
+        if (!_openDocuments.TryGetValue(uri, out var text))
+            return null;
+
+        var cached = _cachedAnalysis.TryGetValue(uri, out var c) ? c : GetOrRecoverAnalysis(uri, text, line);
+        return LspCompletionProvider.GetSignatureHelp(text, line, character, cached?.Symbols);
+    }
+
+    private object HandleDocumentSymbol(JsonElement @params)
+    {
+        string uri = @params.GetProperty("textDocument").GetProperty("uri").GetString() ?? string.Empty;
+        string text = _openDocuments.TryGetValue(uri, out var docText) ? docText : string.Empty;
+        _cachedAnalysis.TryGetValue(uri, out var cached);
+        return LspCompletionProvider.GetDocumentSymbols(text, UriToLocalPath(uri), cached?.Program);
     }
 
     private static (ModuleLoadResult Result, bool LoadedViaProjectEntry) ResolveProjectEntryAndLoad(
@@ -366,13 +606,20 @@ public sealed class PspLanguageServer
         return map;
     }
 
-    private static string? UriToLocalPath(string uri)
+    internal static string? UriToLocalPath(string uri)
     {
         if (Uri.TryCreate(uri, UriKind.Absolute, out var parsed) && parsed.IsFile)
         {
             return parsed.LocalPath;
         }
         return null;
+    }
+
+    internal static string LocalPathToUri(string filePath)
+    {
+        if (filePath.StartsWith("file://", StringComparison.OrdinalIgnoreCase))
+            return filePath;
+        return new Uri(Path.GetFullPath(filePath)).AbsoluteUri;
     }
 
     public bool ShutdownRequested => _shutdownRequested;

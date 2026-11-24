@@ -8,15 +8,17 @@ public sealed class SemanticAnalyzer
     private readonly SymbolTable _symbols = new();
     private readonly SemanticModel _model;
     private readonly List<SemanticDiagnostic> _diagnostics = [];
+    private readonly bool _checkAssetPathsOnDisk;
 
-    public SemanticAnalyzer()
+    public SemanticAnalyzer(bool checkAssetPathsOnDisk = false)
     {
         _model = new SemanticModel(_symbols);
+        _checkAssetPathsOnDisk = checkAssetPathsOnDisk;
     }
 
-    public static SemanticAnalysisResult Analyze(ProgramNode program)
+    public static SemanticAnalysisResult Analyze(ProgramNode program, bool checkAssetPathsOnDisk = false)
     {
-        var analyzer = new SemanticAnalyzer();
+        var analyzer = new SemanticAnalyzer(checkAssetPathsOnDisk);
         return analyzer.Run(program);
     }
 
@@ -31,6 +33,10 @@ public sealed class SemanticAnalyzer
         // Pass 2: Validate initializers, bodies, statements, expressions & memory budget
         ValidateTopLevelInitializersAndBodies(program);
         ValidateStaticMemoryBudget();
+        if (_checkAssetPathsOnDisk)
+        {
+            ValidateAssetAndConfigPathsOnDisk();
+        }
 
         bool hasErrors = _diagnostics.Any(static d => d.Severity == DiagnosticSeverity.Error);
         return new SemanticAnalysisResult(
@@ -2748,6 +2754,71 @@ public sealed class SemanticAnalyzer
                 _symbols.GameConfig?.Span ?? default
             );
         }
+    }
+
+    private void ValidateAssetAndConfigPathsOnDisk()
+    {
+        string? entryDir = _symbols.GameConfig?.SourceDirectory;
+
+        foreach (var asset in _symbols.Assets.Values)
+        {
+            string? sourceDir = asset.Declaration.SourceDirectory ?? Path.GetDirectoryName(asset.Declaration.Span.FilePath);
+            if (string.IsNullOrEmpty(sourceDir) && string.IsNullOrEmpty(entryDir))
+                continue;
+
+            bool found = TryResolveFileOnDisk(asset.FilePath, sourceDir, entryDir);
+            if (!found)
+            {
+                ReportWarning(
+                    $"Asset file '{asset.FilePath}' for '{asset.Name}' was not found on disk.",
+                    asset.Declaration.Span
+                );
+            }
+        }
+
+        if (_symbols.GameConfig is not null)
+        {
+            string? cfgDir = _symbols.GameConfig.SourceDirectory ?? Path.GetDirectoryName(_symbols.GameConfig.Span.FilePath);
+            if (!string.IsNullOrEmpty(cfgDir))
+            {
+                CheckConfigPngOnDisk(_symbols.IconPath, "icon", cfgDir, entryDir, _symbols.GameConfig.Span);
+                CheckConfigPngOnDisk(_symbols.BackgroundPath, "background", cfgDir, entryDir, _symbols.GameConfig.Span);
+                CheckConfigPngOnDisk(_symbols.OverlayPath, "overlay", cfgDir, entryDir, _symbols.GameConfig.Span);
+            }
+        }
+    }
+
+    private void CheckConfigPngOnDisk(string? relPath, string key, string? cfgDir, string? entryDir, SourceSpan span)
+    {
+        if (string.IsNullOrEmpty(relPath))
+            return;
+
+        if (!TryResolveFileOnDisk(relPath, cfgDir, entryDir))
+        {
+            ReportWarning($"Game config '{key}' file '{relPath}' was not found on disk.", span);
+        }
+    }
+
+    private static bool TryResolveFileOnDisk(string rawPath, string? primaryDir, string? fallbackDir)
+    {
+        if (Path.IsPathRooted(rawPath))
+            return File.Exists(rawPath);
+
+        if (!string.IsNullOrEmpty(primaryDir))
+        {
+            string candidate = Path.GetFullPath(Path.Combine(primaryDir, rawPath));
+            if (File.Exists(candidate))
+                return true;
+        }
+
+        if (!string.IsNullOrEmpty(fallbackDir))
+        {
+            string candidate = Path.GetFullPath(Path.Combine(fallbackDir, rawPath));
+            if (File.Exists(candidate))
+                return true;
+        }
+
+        return false;
     }
 
     // ========================================================================
