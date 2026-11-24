@@ -190,7 +190,6 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 * [x] Compile-Time Audio Asset Baker (WAV → PCM) & PSP Audio Runtime Module (`psps_audio.h`)
 * [x] Language Server (LSP) for Real-Time VS Code Diagnostics, Autocomplete & Hover (`PspScript --lsp`)
 * [x] Automated Unit Test Suite (`tests/PspScript.Tests`)
-* [ ] Additional Standard Library Modules
 
 ---
 
