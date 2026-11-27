@@ -140,6 +140,12 @@ public static class PspParser
                 LengthExpr = (Expr)StampNode(fa.LengthExpr, filePath),
                 ElementType = (TypeRef)StampNode(fa.ElementType, filePath)
             },
+            FunctionTypeRef ft => ft with
+            {
+                Span = span,
+                ParameterTypes = ft.ParameterTypes.Select(p => (TypeRef)StampNode(p, filePath)).ToList(),
+                ReturnType = (TypeRef)StampNode(ft.ReturnType, filePath)
+            },
             BlockStmt blk => blk with
             {
                 Span = span,
@@ -278,6 +284,18 @@ public static class PspParser
                 Target = (Expr)StampNode(iae.Target, filePath),
                 Index = (Expr)StampNode(iae.Index, filePath)
             },
+            LambdaParam lp => lp with
+            {
+                Span = span,
+                ExplicitType = lp.ExplicitType is not null ? (TypeRef)StampNode(lp.ExplicitType, filePath) : null
+            },
+            LambdaExpr le => le with
+            {
+                Span = span,
+                Parameters = le.Parameters.Select(p => (LambdaParam)StampNode(p, filePath)).ToList(),
+                BodyExpr = le.BodyExpr is not null ? (Expr)StampNode(le.BodyExpr, filePath) : null,
+                BodyStmt = le.BodyStmt is not null ? (Stmt)StampNode(le.BodyStmt, filePath) : null
+            },
             _ => node with { Span = span }
         };
     }
@@ -362,6 +380,9 @@ public static class PspParser
 
         var expr = Deferred<Expr>();
         var typeRef = Deferred<TypeRef>();
+        var stmt = Deferred<Stmt>();
+        var blockStmt = Deferred<BlockStmt>();
+        var lambdaBodyStmt = Deferred<Stmt>();
 
         // ref<Enemy>
         var actorRefType = Keyword("ref")
@@ -379,13 +400,23 @@ public static class PspParser
             .And(typeRef)
             .Then<TypeRef>(static (context, x) => new FixedArrayTypeRef(x.Item1, x.Item2));
 
+        // fn(f32, f32) -> f32  or  fn()  (shorthand for fn() -> void)
+        var functionTypeRef = Keyword("fn")
+            .SkipAnd(Between(
+                Terms.Char('(').ElseError("Expected '(' after 'fn' in function type"),
+                Separated(Terms.Char(','), typeRef, min: 0),
+                Terms.Char(')').ElseError("Expected ')' closing function type parameters")
+            ))
+            .And(Terms.Text("->").SkipAnd(typeRef).Else(new BuiltinTypeRef("void")))
+            .Then<TypeRef>(static (context, x) => new FunctionTypeRef(x.Item1, x.Item2));
+
         // Built-in or user-defined type name
         var namedOrBuiltinType = rawIdentifier
             .Then<TypeRef>(static (context, name) => BuiltinTypes.Contains(name)
                 ? new BuiltinTypeRef(name)
                 : new NamedTypeRef(name));
 
-        typeRef.Parser = WithSpan(OneOf(actorRefType, fixedArrayType, namedOrBuiltinType));
+        typeRef.Parser = WithSpan(OneOf(actorRefType, fixedArrayType, functionTypeRef, namedOrBuiltinType));
 
         // ====================================================================
         // Expressions & PSP Literals
@@ -513,6 +544,26 @@ public static class PspParser
             )
             .Then<Expr>(static (context, list) => new VecLiteralExpr(list));
 
+        // Non-capturing arrow lambda: () => goto Match, (x: f32) => x * 2.0, (a, b) => { ... }
+        var lambdaParam = WithSpan(identifier
+            .And(Terms.Char(':').SkipAnd(typeRef).ThenElse<TypeRef?>(static (context, t) => t, null))
+            .Then(static (context, x) => new LambdaParam(x.Item1, x.Item2)));
+
+        var lambdaBody = OneOf(
+            blockStmt.Then<(Expr? Expr, Stmt? Stmt)>(static (context, b) => (null, b)),
+            lambdaBodyStmt.Then<(Expr? Expr, Stmt? Stmt)>(static (context, s) => (null, s)),
+            expr.Then<(Expr? Expr, Stmt? Stmt)>(static (context, e) => (e, null))
+        );
+
+        var lambdaExpr = Between(
+                Terms.Char('('),
+                Separated(Terms.Char(','), lambdaParam, min: 0),
+                Terms.Char(')')
+            )
+            .AndSkip(Terms.Text("=>"))
+            .And(lambdaBody.ElseError("Expected lambda body after '=>'"))
+            .Then<Expr>(static (context, x) => new LambdaExpr(x.Item1, x.Item2.Expr, x.Item2.Stmt));
+
         var primaryExpr = WithSpan(OneOf(
             hexColorExpr,
             numericExpr,
@@ -523,6 +574,7 @@ public static class PspParser
             matchExpr,
             gameTypeCtorExpr,
             vecLiteralExpr,
+            lambdaExpr,
             Between(Terms.Char('('), expr, Terms.Char(')').ElseError("Expected ')'")),
             idExpr
         ));
@@ -686,9 +738,6 @@ public static class PspParser
         // ====================================================================
         // Statements & Blocks
         // ====================================================================
-
-        var stmt = Deferred<Stmt>();
-        var blockStmt = Deferred<BlockStmt>();
 
         blockStmt.Parser = WithSpan(Between(
                 Terms.Char('{'),
@@ -859,6 +908,24 @@ public static class PspParser
             .Then<Stmt>(static (context, x) => x.Item2.Value is not null
                 ? new AssignStmt(x.Item1, x.Item2.Op, x.Item2.Value)
                 : new ExprStmt(x.Item1));
+
+        var strictAssignStmt = postfixExpr
+            .And(assignOp)
+            .And(expr)
+            .Then<Stmt>(static (context, x) => new AssignStmt(x.Item1, x.Item2, x.Item3));
+
+        lambdaBodyStmt.Parser = WithSpan(OneOf(
+            ifStmt.Then<Stmt>(static (context, i) => i),
+            forRangeStmt,
+            forCondStmt,
+            forEachStmt,
+            returnStmt,
+            sendStmt,
+            spawnStandalone,
+            destroyStmt,
+            transitionStmt,
+            strictAssignStmt
+        ));
 
         stmt.Parser = WithSpan(OneOf(
             spawnWithBinding,

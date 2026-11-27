@@ -214,5 +214,12 @@
       "}"
     ],
     "description": "Declare a PSPScript function"
+  },
+  "Lambda Expression": {
+    "prefix": "lambda",
+    "body": [
+      "(${1:x}: ${2:f32}) => ${3:x}"
+    ],
+    "description": "Zero-heap non-capturing arrow lambda expression"
   }
 }

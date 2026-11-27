@@ -12,9 +12,26 @@ state MainMenu {
 
         selected_index = 0
 
-        spawn Button { pos: { 140.0, 112.0 }, width: 200, height: 28, action_id: 0, selected: true }
-        spawn Button { pos: { 140.0, 148.0 }, width: 200, height: 28, action_id: 1, selected: false }
-        spawn Button { pos: { 140.0, 184.0 }, width: 200, height: 28, action_id: 2, selected: false }
+        spawn Button {
+            pos: vec2(140.0, 112.0), width: 200, height: 28,
+            action_id: ACT_PLAY, selected: true,
+            on_click: () => goto Match
+        }
+        spawn Button {
+            pos: vec2(140.0, 148.0), width: 200, height: 28,
+            action_id: ACT_DIFFICULTY, selected: false,
+            on_click: () => {
+                cpu_difficulty = cpu_difficulty >= DIFF_HARD ? DIFF_EASY : cpu_difficulty + 1
+            }
+        }
+        spawn Button {
+            pos: vec2(140.0, 184.0), width: 200, height: 28,
+            action_id: ACT_RESET, selected: false,
+            on_click: () => {
+                player_wins = 0
+                save_game()
+            }
+        }
     }
 
     update(dt: f32) {

@@ -208,6 +208,7 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 * [x] Loop Ergonomics (`continue` statement & inclusive ranges `0..=10`)
 * [x] Field Type Inference & Typed Game Constructors (`vec2(x, y)`, `vec3(x, y, z)`, `rect(x, y, w, h)`)
 * [x] Enhanced `match` (multi-pattern `|` arms, `const` patterns, and `match` expressions)
+* [x] First-Class Function Types (`fn(T1, T2) -> R`) & Zero-Heap Non-Capturing Lambdas (`(x) => x * 2.0`, null-safe `void` callbacks)
 
 ---
 

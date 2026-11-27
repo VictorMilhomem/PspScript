@@ -167,10 +167,10 @@ public sealed partial class CCodeGenerator
     private void EmitFreeFunctions()
     {
         var freeFuncs = _program.Declarations.OfType<FuncDecl>().ToList();
-        if (freeFuncs.Count == 0)
+        if (freeFuncs.Count == 0 && _model.Lambdas.Count == 0)
             return;
 
-        _writer.WriteSectionHeader("8. Free Functions");
+        _writer.WriteSectionHeader("8. Free Functions & Hoisted Lambdas");
 
         foreach (var fnDecl in freeFuncs)
         {
@@ -186,6 +186,45 @@ public sealed partial class CCodeGenerator
             }
 
             EmitBlockStatements(fnDecl.Body, fnCtx);
+            _writer.CloseBlock();
+            _writer.WriteLine();
+        }
+
+        for (int i = 0; i < _model.Lambdas.Count; i++)
+        {
+            var lambda = _model.Lambdas[i];
+            if (_model.GetTypeOrDefault(lambda) is not FunctionType fnType)
+                continue;
+
+            _writer.OpenBlock(CTypeMapper.FormatLambdaSignature(i, lambda, fnType));
+            var lambdaCtx = new EmissionContext();
+            foreach (var p in lambda.Parameters)
+            {
+                lambdaCtx.LocalVariables.Add(p.Name);
+                _writer.WriteLine($"(void){p.Name};");
+            }
+
+            if (lambda.BodyExpr is not null)
+            {
+                string exprCode = EmitExpr(lambda.BodyExpr, lambdaCtx);
+                if (fnType.ReturnType == ResolvedType.Void)
+                {
+                    _writer.WriteLine($"{exprCode};");
+                }
+                else
+                {
+                    _writer.WriteLine($"return {exprCode};");
+                }
+            }
+            else if (lambda.BodyStmt is BlockStmt block)
+            {
+                EmitBlockStatements(block, lambdaCtx);
+            }
+            else if (lambda.BodyStmt is not null)
+            {
+                EmitStmt(lambda.BodyStmt, lambdaCtx);
+            }
+
             _writer.CloseBlock();
             _writer.WriteLine();
         }

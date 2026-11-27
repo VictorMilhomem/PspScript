@@ -769,6 +769,7 @@ public static class LspCompletionProvider
             : f.LengthExpr is IdentifierExpr id
                 ? $"[{id.Name}]{FormatTypeRef(f.ElementType)}"
                 : $"[...]{FormatTypeRef(f.ElementType)}",
+        FunctionTypeRef fn => $"fn({string.Join(", ", fn.ParameterTypes.Select(FormatTypeRef))}) -> {FormatTypeRef(fn.ReturnType)}",
         null => "inferred",
         _ => "any"
     };

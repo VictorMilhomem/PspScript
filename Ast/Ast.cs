@@ -157,6 +157,11 @@ public record ActorRefTypeRef(string ActorName) : TypeRef;
 /// </summary>
 public record FixedArrayTypeRef(Expr LengthExpr, TypeRef ElementType) : TypeRef;
 
+/// <summary>
+/// First-class C99 function pointer type: fn(f32, f32) -> f32 or fn()
+/// </summary>
+public record FunctionTypeRef(IReadOnlyList<TypeRef> ParameterTypes, TypeRef ReturnType) : TypeRef;
+
 // ============================================================================
 // Statements (Imperative & Actor Event Flow)
 // ============================================================================
@@ -349,4 +354,15 @@ public record IndexAccessExpr(
     Expr Target,
     Expr Index
 ): Expr;
+
+public record LambdaParam(string Name, TypeRef? ExplicitType) : AstNode;
+
+/// <summary>
+/// Zero-heap non-capturing arrow lambda: () => goto Match, (x: f32) => x * 2.0, (a, b) => { ... }
+/// </summary>
+public record LambdaExpr(
+    IReadOnlyList<LambdaParam> Parameters,
+    Expr? BodyExpr,
+    Stmt? BodyStmt
+) : Expr;
 

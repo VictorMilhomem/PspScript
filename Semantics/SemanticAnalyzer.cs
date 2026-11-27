@@ -681,6 +681,8 @@ public sealed class SemanticAnalyzer
 
             FixedArrayTypeRef arrayRef => ResolveFixedArrayType(arrayRef),
 
+            FunctionTypeRef fnRef => ResolveFunctionType(fnRef),
+
             _ => ReportAndReturnError($"Unsupported type reference '{typeRef}'.", typeRef.Span)
         };
 
@@ -746,6 +748,24 @@ public sealed class SemanticAnalyzer
         }
 
         return new FixedArrayType(resolvedLength, elementType);
+    }
+
+    private ResolvedType ResolveFunctionType(FunctionTypeRef fnRef)
+    {
+        var paramTypes = new List<ResolvedType>(fnRef.ParameterTypes.Count);
+        foreach (var paramTypeRef in fnRef.ParameterTypes)
+        {
+            var paramType = ResolveTypeRef(paramTypeRef);
+            if (paramType == ResolvedType.Void)
+            {
+                ReportError("Function type parameter cannot have type 'void'.", paramTypeRef.Span);
+                paramType = ResolvedType.Error;
+            }
+            paramTypes.Add(paramType);
+        }
+
+        var returnType = ResolveTypeRef(fnRef.ReturnType);
+        return new FunctionType(paramTypes, returnType);
     }
 
     private void CheckStructCycles()
@@ -1393,6 +1413,13 @@ public sealed class SemanticAnalyzer
             {
                 ReportError($"Cannot assign to compile-time asset '{idTarget.Name}'.", assign.Span);
             }
+            else if (_symbols.Functions.ContainsKey(idTarget.Name) &&
+                     !scope.TryLookupLocal(idTarget.Name, out _) &&
+                     !(scope.EnclosingActor?.Fields.ContainsKey(idTarget.Name) ?? false) &&
+                     !(scope.EnclosingState?.Fields.ContainsKey(idTarget.Name) ?? false))
+            {
+                ReportError($"Cannot assign to function '{idTarget.Name}'.", assign.Span);
+            }
         }
 
         var targetType = ResolveExpr(assign.Target, scope, expectedType: null);
@@ -1843,6 +1870,50 @@ public sealed class SemanticAnalyzer
 
     private void ValidateReturnStmt(ReturnStmt returnStmt, LexicalScope scope)
     {
+        if (scope.InferReturnType)
+        {
+            var rootLambda = scope.RootLambdaScope;
+            if (returnStmt.Value is null)
+            {
+                if (rootLambda.InferredReturnType is not null &&
+                    rootLambda.InferredReturnType != ResolvedType.Void &&
+                    !rootLambda.InferredReturnType.IsError)
+                {
+                    ReportError($"Return statement must return a value of type '{rootLambda.InferredReturnType}'.", returnStmt.Span);
+                }
+                else
+                {
+                    rootLambda.InferredReturnType = ResolvedType.Void;
+                }
+                _model.RecordType(returnStmt, ResolvedType.Void);
+                return;
+            }
+
+            var inferredVal = ResolveExpr(returnStmt.Value, scope, expectedType: rootLambda.InferredReturnType);
+            if (rootLambda.InferredReturnType is null)
+            {
+                rootLambda.InferredReturnType = inferredVal;
+            }
+            else if (rootLambda.InferredReturnType == ResolvedType.Void)
+            {
+                ReportError("Cannot return a value from a void lambda.", returnStmt.Span);
+            }
+            else if (!ResolvedType.IsAssignableTo(inferredVal, rootLambda.InferredReturnType))
+            {
+                if (ResolvedType.IsAssignableTo(rootLambda.InferredReturnType, inferredVal))
+                {
+                    rootLambda.InferredReturnType = inferredVal;
+                }
+                else
+                {
+                    ReportError($"Cannot return value of type '{inferredVal}'; expected '{rootLambda.InferredReturnType}'.", returnStmt.Span);
+                }
+            }
+
+            _model.RecordType(returnStmt, inferredVal);
+            return;
+        }
+
         var expected = scope.ExpectedReturnType;
 
         if (returnStmt.Value is null)
@@ -2077,7 +2148,7 @@ public sealed class SemanticAnalyzer
             ColorLiteralExpr => ResolvedType.Color,
             StringLiteralExpr => ResolvedType.String,
             BooleanLiteralExpr => ResolvedType.Bool,
-            NullLiteralExpr => ResolvedType.Null,
+            NullLiteralExpr => expectedType is FunctionType ? expectedType : ResolvedType.Null,
             SelfExpr selfExpr => ResolveSelfExpr(selfExpr, scope),
             VecLiteralExpr vecExpr => ResolveVecLiteralExpr(vecExpr, scope, expectedType),
             IdentifierExpr idExpr => ResolveIdentifierExpr(idExpr, scope),
@@ -2088,6 +2159,7 @@ public sealed class SemanticAnalyzer
             FieldAccessExpr fieldExpr => ResolveFieldAccessExpr(fieldExpr, scope),
             IndexAccessExpr indexExpr => ResolveIndexAccessExpr(indexExpr, scope),
             CallExpr callExpr => ResolveCallExpr(callExpr, scope),
+            LambdaExpr lambdaExpr => ResolveLambdaExpr(lambdaExpr, scope, expectedType),
             _ => ReportAndReturnError($"Unsupported expression node '{expr.GetType().Name}'.", expr.Span)
         };
 
@@ -2184,6 +2256,15 @@ public sealed class SemanticAnalyzer
 
     private ResolvedType ResolveSelfExpr(SelfExpr selfExpr, LexicalScope scope)
     {
+        if (scope.IsInsideLambda)
+        {
+            ReportError(
+                "Cannot capture 'self' inside a lambda. PSPScript lambdas are zero-heap non-capturing function pointers.",
+                selfExpr.Span
+            );
+            return ResolvedType.Error;
+        }
+
         if (scope.EnclosingActor is null)
         {
             ReportError("'self' is only valid inside an 'actor' declaration.", selfExpr.Span);
@@ -2191,6 +2272,136 @@ public sealed class SemanticAnalyzer
         }
 
         return scope.EnclosingActor.RefType;
+    }
+
+    private ResolvedType ResolveLambdaExpr(LambdaExpr lambda, LexicalScope outerScope, ResolvedType? expectedType)
+    {
+        var expectedFn = expectedType as FunctionType;
+
+        if (expectedFn is not null && lambda.Parameters.Count != expectedFn.ParameterTypes.Count)
+        {
+            ReportError(
+                $"Lambda has {lambda.Parameters.Count} parameter(s), but expected '{expectedFn}' with {expectedFn.ParameterTypes.Count} parameter(s).",
+                lambda.Span
+            );
+        }
+
+        var paramTypes = new List<ResolvedType>(lambda.Parameters.Count);
+        var seenParams = new HashSet<string>(StringComparer.Ordinal);
+        bool inferReturn = expectedFn is null;
+        var lambdaScope = new LexicalScope(
+            parent: null,
+            enclosingActor: null,
+            enclosingState: null,
+            expectedReturnType: expectedFn?.ReturnType ?? ResolvedType.Void,
+            isInsideLoop: false,
+            isInsideLambda: true,
+            outerScopeForCaptureCheck: outerScope,
+            inferReturnType: inferReturn
+        );
+
+        for (int i = 0; i < lambda.Parameters.Count; i++)
+        {
+            var param = lambda.Parameters[i];
+            if (!seenParams.Add(param.Name))
+            {
+                ReportError($"Duplicate parameter '{param.Name}' in lambda.", param.Span);
+            }
+
+            ResolvedType paramType;
+            if (param.ExplicitType is not null)
+            {
+                paramType = ResolveTypeRef(param.ExplicitType);
+                if (paramType == ResolvedType.Void)
+                {
+                    ReportError($"Lambda parameter '{param.Name}' cannot have type 'void'.", param.Span);
+                    paramType = ResolvedType.Error;
+                }
+            }
+            else if (expectedFn is not null && i < expectedFn.ParameterTypes.Count)
+            {
+                paramType = expectedFn.ParameterTypes[i];
+            }
+            else
+            {
+                ReportError(
+                    $"Cannot infer type for lambda parameter '{param.Name}'. Provide an explicit type annotation or assign the lambda to a typed function variable/field.",
+                    param.Span
+                );
+                paramType = ResolvedType.Error;
+            }
+
+            _model.RecordType(param, paramType);
+            paramTypes.Add(paramType);
+            lambdaScope.TryDeclareLocal(new VariableSymbol(param.Name, MemoryScope.Stack, paramType, Declaration: param));
+        }
+
+        ResolvedType returnType;
+        if (lambda.BodyExpr is not null)
+        {
+            var bodyType = ResolveExpr(lambda.BodyExpr, lambdaScope, expectedType: expectedFn?.ReturnType);
+            if (expectedFn is not null)
+            {
+                if (expectedFn.ReturnType == ResolvedType.Void)
+                {
+                    if (bodyType != ResolvedType.Void && !bodyType.IsError)
+                    {
+                        ReportError(
+                            $"Lambda expression returns '{bodyType}', but expected 'void'.",
+                            lambda.BodyExpr.Span
+                        );
+                    }
+                }
+                else if (!ResolvedType.IsAssignableTo(bodyType, expectedFn.ReturnType))
+                {
+                    ReportError(
+                        $"Lambda expression returns '{bodyType}', expected '{expectedFn.ReturnType}'.",
+                        lambda.BodyExpr.Span
+                    );
+                }
+                returnType = expectedFn.ReturnType;
+            }
+            else
+            {
+                returnType = bodyType;
+            }
+        }
+        else if (lambda.BodyStmt is BlockStmt block)
+        {
+            ValidateBlockStmt(block, lambdaScope, createChildScope: false);
+            returnType = expectedFn?.ReturnType ?? (lambdaScope.InferredReturnType ?? ResolvedType.Void);
+
+            if (returnType != ResolvedType.Void && !returnType.IsError && !BlockDefinitelyReturns(block))
+            {
+                ReportError(
+                    $"Lambda expects return type '{returnType}', but not all code paths return a value.",
+                    lambda.Span
+                );
+            }
+        }
+        else if (lambda.BodyStmt is not null)
+        {
+            ValidateStmt(lambda.BodyStmt, lambdaScope);
+            returnType = expectedFn?.ReturnType ?? (lambdaScope.InferredReturnType ?? ResolvedType.Void);
+
+            if (expectedFn is not null &&
+                expectedFn.ReturnType != ResolvedType.Void &&
+                !expectedFn.ReturnType.IsError &&
+                lambda.BodyStmt is not ReturnStmt)
+            {
+                ReportError(
+                    $"Lambda statement body returns 'void', expected '{expectedFn.ReturnType}'.",
+                    lambda.BodyStmt.Span
+                );
+            }
+        }
+        else
+        {
+            returnType = ResolvedType.Void;
+        }
+
+        _model.RegisterLambda(lambda);
+        return new FunctionType(paramTypes, returnType);
     }
 
     private ResolvedType ResolveVecLiteralExpr(
@@ -2272,11 +2483,34 @@ public sealed class SemanticAnalyzer
         if (_symbols.Actors.TryGetValue(idExpr.Name, out var actorSym) && actorSym.IsSingleton)
             return actorSym.RefType;
 
+        // Top-level user-defined functions as first-class function values
+        if (_symbols.Functions.TryGetValue(idExpr.Name, out var fnSym))
+        {
+            if (fnSym.IsBuiltin || fnSym.IsVariadic)
+            {
+                ReportError(
+                    $"Built-in function '{idExpr.Name}' cannot be used as a function value; wrap it in a lambda instead.",
+                    idExpr.Span
+                );
+                return ResolvedType.Error;
+            }
+            return fnSym.Signature;
+        }
+
         if (_symbols.Enums.TryGetValue(idExpr.Name, out var enumSym))
         {
             string example = enumSym.Variants.Count > 0 ? enumSym.Variants[0] : "Variant";
             ReportError(
                 $"'{idExpr.Name}' is an enum type; access a variant such as '{idExpr.Name}.{example}'.",
+                idExpr.Span
+            );
+            return ResolvedType.Error;
+        }
+
+        if (scope.IsInsideLambda && scope.TryLookupOuterCaptured(idExpr.Name, out var captureKind))
+        {
+            ReportError(
+                $"Cannot capture {captureKind} '{idExpr.Name}' inside a lambda. PSPScript lambdas are zero-heap non-capturing function pointers; pass values as parameters or use globals/constants.",
                 idExpr.Span
             );
             return ResolvedType.Error;
@@ -2390,6 +2624,11 @@ public sealed class SemanticAnalyzer
             case BinaryOp.Equal:
             case BinaryOp.NotEqual:
             {
+                if (leftType is FunctionType && binaryExpr.Right is NullLiteralExpr)
+                    _model.RecordType(binaryExpr.Right, leftType);
+                else if (rightType is FunctionType && binaryExpr.Left is NullLiteralExpr)
+                    _model.RecordType(binaryExpr.Left, rightType);
+
                 bool comparable =
                     ResolvedType.IsAssignableTo(leftType, rightType) ||
                     ResolvedType.IsAssignableTo(rightType, leftType);
@@ -2579,47 +2818,141 @@ public sealed class SemanticAnalyzer
             return ResolveMethodCallExpr(callExpr, memberAccess, scope);
         }
 
-        // Direct function or enclosing actor/state method call (e.g., sprite(...), helper(...))
+        // Direct function, method, or function-pointer variable/field call
         if (callExpr.Callee is IdentifierExpr funcId)
         {
-            FunctionSymbol? fnSym = null;
-
-            if (scope.EnclosingActor is not null &&
-                scope.EnclosingActor.Methods.TryGetValue(funcId.Name, out var actorMethod))
+            // 1. Local variable or parameter (e.g., callback parameter `cb(x)`)
+            if (scope.TryLookupLocal(funcId.Name, out var localSym))
             {
-                fnSym = actorMethod;
-            }
-            else if (scope.EnclosingState is not null &&
-                     scope.EnclosingState.Methods.TryGetValue(funcId.Name, out var stateMethod))
-            {
-                fnSym = stateMethod;
-            }
-            else if (_symbols.Functions.TryGetValue(funcId.Name, out var globalFn))
-            {
-                fnSym = globalFn;
+                _model.RecordType(callExpr.Callee, localSym!.Type);
+                return ValidateFunctionValueCall(funcId.Name, localSym.Type, callExpr.Arguments, scope, callExpr.Span);
             }
 
-            if (fnSym is null)
+            // 2. Enclosing actor method or function-typed field
+            if (scope.EnclosingActor is not null)
+            {
+                if (scope.EnclosingActor.Methods.TryGetValue(funcId.Name, out var actorMethod))
+                {
+                    _model.RecordType(callExpr.Callee, actorMethod.Signature);
+                    ValidateCallArguments(actorMethod.Name, actorMethod, callExpr.Arguments, scope, callExpr.Span);
+                    return actorMethod.ReturnType;
+                }
+                if (scope.EnclosingActor.Fields.TryGetValue(funcId.Name, out var actorField))
+                {
+                    _model.RecordType(callExpr.Callee, actorField.Type);
+                    return ValidateFunctionValueCall(funcId.Name, actorField.Type, callExpr.Arguments, scope, callExpr.Span);
+                }
+            }
+
+            // 3. Enclosing state method or function-typed field
+            if (scope.EnclosingState is not null)
+            {
+                if (scope.EnclosingState.Methods.TryGetValue(funcId.Name, out var stateMethod))
+                {
+                    _model.RecordType(callExpr.Callee, stateMethod.Signature);
+                    ValidateCallArguments(stateMethod.Name, stateMethod, callExpr.Arguments, scope, callExpr.Span);
+                    return stateMethod.ReturnType;
+                }
+                if (scope.EnclosingState.Fields.TryGetValue(funcId.Name, out var stateField))
+                {
+                    _model.RecordType(callExpr.Callee, stateField.Type);
+                    return ValidateFunctionValueCall(funcId.Name, stateField.Type, callExpr.Arguments, scope, callExpr.Span);
+                }
+            }
+
+            // 4. Top-level or built-in function
+            if (_symbols.Functions.TryGetValue(funcId.Name, out var globalFn))
+            {
+                _model.RecordType(callExpr.Callee, globalFn.Signature);
+                ValidateCallArguments(globalFn.Name, globalFn, callExpr.Arguments, scope, callExpr.Span);
+                return globalFn.ReturnType;
+            }
+
+            // 5. Global/level variable of function type
+            if (_symbols.Globals.TryGetValue(funcId.Name, out var globalVar))
+            {
+                _model.RecordType(callExpr.Callee, globalVar.Type);
+                return ValidateFunctionValueCall(funcId.Name, globalVar.Type, callExpr.Arguments, scope, callExpr.Span);
+            }
+
+            if (scope.IsInsideLambda && scope.TryLookupOuterCaptured(funcId.Name, out var captureKind))
+            {
+                ReportError(
+                    $"Cannot capture {captureKind} '{funcId.Name}' inside a lambda. PSPScript lambdas are zero-heap non-capturing function pointers.",
+                    callExpr.Span
+                );
+            }
+            else
             {
                 ReportError($"Call to undeclared function '{funcId.Name}'.", callExpr.Span);
-                foreach (var arg in callExpr.Arguments)
-                {
-                    ResolveExpr(arg, scope, expectedType: null);
-                }
-                return ResolvedType.Error;
             }
 
-            _model.RecordType(callExpr.Callee, fnSym.Signature);
-            ValidateCallArguments(fnSym.Name, fnSym, callExpr.Arguments, scope, callExpr.Span);
-            return fnSym.ReturnType;
+            foreach (var arg in callExpr.Arguments)
+            {
+                ResolveExpr(arg, scope, expectedType: null);
+            }
+            return ResolvedType.Error;
         }
 
-        ReportError("Invalid call target expression.", callExpr.Span);
-        foreach (var arg in callExpr.Arguments)
+        // Indirect call through any function-typed expression (e.g., callbacks[i](), get_fn()())
+        var calleeType = ResolveExpr(callExpr.Callee, scope, expectedType: null);
+        if (calleeType.IsError)
         {
-            ResolveExpr(arg, scope, expectedType: null);
+            foreach (var arg in callExpr.Arguments)
+            {
+                ResolveExpr(arg, scope, expectedType: null);
+            }
+            return ResolvedType.Error;
         }
-        return ResolvedType.Error;
+
+        return ValidateFunctionValueCall(calleeType.DisplayName, calleeType, callExpr.Arguments, scope, callExpr.Span);
+    }
+
+    private ResolvedType ValidateFunctionValueCall(
+        string callableName,
+        ResolvedType calleeType,
+        IReadOnlyList<Expr> arguments,
+        LexicalScope scope,
+        SourceSpan callSpan)
+    {
+        if (calleeType.IsError)
+        {
+            foreach (var arg in arguments)
+                ResolveExpr(arg, scope, expectedType: null);
+            return ResolvedType.Error;
+        }
+
+        if (calleeType is not FunctionType fnType)
+        {
+            ReportError($"Cannot call value '{callableName}' of non-function type '{calleeType}'.", callSpan);
+            foreach (var arg in arguments)
+                ResolveExpr(arg, scope, expectedType: null);
+            return ResolvedType.Error;
+        }
+
+        int expectedCount = fnType.ParameterTypes.Count;
+        if (arguments.Count != expectedCount)
+        {
+            ReportError(
+                $"Function value '{callableName}' expects {expectedCount} argument(s), got {arguments.Count}.",
+                callSpan
+            );
+        }
+
+        for (int i = 0; i < arguments.Count; i++)
+        {
+            var expectedParamType = i < expectedCount ? fnType.ParameterTypes[i] : null;
+            var argType = ResolveExpr(arguments[i], scope, expectedType: expectedParamType);
+            if (expectedParamType is not null && !ResolvedType.IsAssignableTo(argType, expectedParamType))
+            {
+                ReportError(
+                    $"Argument {i + 1} of '{callableName}' expects '{expectedParamType}', got '{argType}'.",
+                    arguments[i].Span
+                );
+            }
+        }
+
+        return fnType.ReturnType;
     }
 
     private ResolvedType ResolveMethodCallExpr(
@@ -2954,12 +3287,39 @@ public sealed class SemanticAnalyzer
 
         // Actor methods via ref<ActorName>
         if (receiverType is ActorRefType actorRef &&
-            _symbols.Actors.TryGetValue(actorRef.ActorName, out var actorSym) &&
-            actorSym.Methods.TryGetValue(methodName, out var actorMethod))
+            _symbols.Actors.TryGetValue(actorRef.ActorName, out var actorSym))
         {
-            _model.RecordType(memberAccess, actorMethod.Signature);
-            ValidateCallArguments($"{actorSym.Name}.{methodName}", actorMethod, callExpr.Arguments, scope, callExpr.Span);
-            return actorMethod.ReturnType;
+            if (actorSym.Methods.TryGetValue(methodName, out var actorMethod))
+            {
+                _model.RecordType(memberAccess, actorMethod.Signature);
+                ValidateCallArguments($"{actorSym.Name}.{methodName}", actorMethod, callExpr.Arguments, scope, callExpr.Span);
+                return actorMethod.ReturnType;
+            }
+
+            if (actorSym.Fields.TryGetValue(methodName, out var actorField) && actorField.Type is FunctionType actorFnField)
+            {
+                _model.RecordType(memberAccess, actorFnField);
+                return ValidateFunctionValueCall($"{actorSym.Name}.{methodName}", actorFnField, callExpr.Arguments, scope, callExpr.Span);
+            }
+        }
+
+        // Function-typed fields on structs and messages (e.g. cfg.on_done())
+        if (receiverType is StructType structType &&
+            _symbols.Structs.TryGetValue(structType.Name, out var structSym) &&
+            structSym.Fields.TryGetValue(methodName, out var structField) &&
+            structField.Type is FunctionType structFnField)
+        {
+            _model.RecordType(memberAccess, structFnField);
+            return ValidateFunctionValueCall($"{structSym.Name}.{methodName}", structFnField, callExpr.Arguments, scope, callExpr.Span);
+        }
+
+        if (receiverType is MessageType msgType &&
+            _symbols.Messages.TryGetValue(msgType.Name, out var msgSym) &&
+            msgSym.Fields.TryGetValue(methodName, out var msgField) &&
+            msgField.Type is FunctionType msgFnField)
+        {
+            _model.RecordType(memberAccess, msgFnField);
+            return ValidateFunctionValueCall($"{msgSym.Name}.{methodName}", msgFnField, callExpr.Arguments, scope, callExpr.Span);
         }
 
         foreach (var arg in callExpr.Arguments)

@@ -27,10 +27,13 @@ public sealed class SemanticModel
 {
     private readonly Dictionary<AstNode, ResolvedType> _nodeTypes = new(ReferenceEqualityComparer.Instance);
     private readonly Dictionary<ConstPattern, ConstValue> _resolvedConstPatterns = new(ReferenceEqualityComparer.Instance);
+    private readonly List<LambdaExpr> _lambdas = [];
+    private readonly Dictionary<LambdaExpr, int> _lambdaIds = new(ReferenceEqualityComparer.Instance);
 
     public SymbolTable Symbols { get; }
     public IReadOnlyDictionary<AstNode, ResolvedType> NodeTypes => _nodeTypes;
     public IReadOnlyDictionary<ConstPattern, ConstValue> ResolvedConstPatterns => _resolvedConstPatterns;
+    public IReadOnlyList<LambdaExpr> Lambdas => _lambdas;
     public long EstimatedStaticMemoryBytes { get; internal set; }
     public long? ConfiguredRamBudgetBytes => Symbols.ConfiguredRamBudgetBytes;
 
@@ -49,6 +52,20 @@ public sealed class SemanticModel
     {
         _resolvedConstPatterns[pattern] = value;
     }
+
+    internal int RegisterLambda(LambdaExpr lambda)
+    {
+        if (_lambdaIds.TryGetValue(lambda, out int existing))
+            return existing;
+
+        int id = _lambdas.Count;
+        _lambdas.Add(lambda);
+        _lambdaIds[lambda] = id;
+        return id;
+    }
+
+    public bool TryGetLambdaId(LambdaExpr lambda, out int id) =>
+        _lambdaIds.TryGetValue(lambda, out id);
 
     public bool TryGetType(AstNode node, out ResolvedType? type) =>
         _nodeTypes.TryGetValue(node, out type);

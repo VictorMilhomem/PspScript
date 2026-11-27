@@ -151,6 +151,15 @@ public sealed partial class CCodeGenerator
         {
             _writer.WriteLine($"{CTypeMapper.FormatFunctionSignature(null, fn)};");
         }
+
+        for (int i = 0; i < _model.Lambdas.Count; i++)
+        {
+            var lambda = _model.Lambdas[i];
+            if (_model.GetTypeOrDefault(lambda) is FunctionType fnType)
+            {
+                _writer.WriteLine($"{CTypeMapper.FormatLambdaSignature(i, lambda, fnType)};");
+            }
+        }
     }
 
     // ========================================================================

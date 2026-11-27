@@ -57,12 +57,14 @@ Type           ::= PrimitiveType
                  | GameType
                  | ActorRefType
                  | ArrayType
-                 | IDENT              // User-defined struct
+                 | FunctionType
+                 | IDENT              // User-defined struct or enum
 
 PrimitiveType  ::= "int" | "u8" | "u16" | "u32" | "f32" | "bool" | "void"
 GameType       ::= "vec2" | "vec3" | "rect" | "color" | "timer"
 ActorRefType   ::= "ref" "<" IDENT ">" // 32-bit generational handle
 ArrayType      ::= "[" ConstExpr "]" Type   // Fixed-size arrays only (no dynamic heap)
+FunctionType   ::= "fn" "(" (Type ("," Type)*)? ")" ("->" Type)? // 4-byte C99 function pointer; omits "-> void" by default
 
 GlobalVarDecl  ::= ("level" | "global")? "var" IDENT (":" Type)? ("=" Expr)?
 FieldDecl      ::= IDENT (":" Type ("=" Expr)? | "=" Expr)
@@ -147,8 +149,12 @@ Primary        ::= INT
                  | COLOR_LITERAL      // E.g.: #FF00AA -> 0xFFAA00FF (ABGR)
                  | STRING
                  | "true" | "false" | "null" | "self"
+                 | MatchExpr
                  | VecLiteral         // E.g.: { 10.0, 20.0 }
+                 | LambdaExpr         // E.g.: () => goto Match, (x: f32) => x * 2.0
                  | IDENT
                  | "(" Expr ")"
 
+LambdaExpr     ::= "(" (LambdaParam ("," LambdaParam)*)? ")" "=>" (Block | Stmt | Expr)
+LambdaParam    ::= IDENT (":" Type)?
 VecLiteral     ::= "{" Expr "," Expr ("," Expr ("," Expr)?)? "}"

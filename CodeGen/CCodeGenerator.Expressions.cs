@@ -20,7 +20,7 @@ public sealed partial class CCodeGenerator
             ColorLiteralExpr colorLit => CSourceWriter.FormatColor(colorLit.AbgrValue),
             StringLiteralExpr strLit => $"\"{CTypeMapper.EscapeCString(strLit.Text)}\"",
             BooleanLiteralExpr boolLit => boolLit.Value ? "true" : "false",
-            NullLiteralExpr => "PSPS_NULL_REF",
+            NullLiteralExpr => _model.GetTypeOrDefault(expr) is FunctionType ? "NULL" : "PSPS_NULL_REF",
             SelfExpr => "self_ref",
             VecLiteralExpr vecLit => EmitVecLiteralExpr(vecLit, ctx),
             IdentifierExpr idExpr => EmitIdentifierExpr(idExpr, ctx),
@@ -31,6 +31,7 @@ public sealed partial class CCodeGenerator
             FieldAccessExpr fieldExpr => EmitFieldAccessExpr(fieldExpr, ctx),
             IndexAccessExpr indexExpr => $"{EmitExpr(indexExpr.Target, ctx)}[{EmitExpr(indexExpr.Index, ctx)}]",
             CallExpr callExpr => EmitCallExpr(callExpr, ctx),
+            LambdaExpr lambdaExpr => _model.TryGetLambdaId(lambdaExpr, out int lambdaId) ? $"psps_lambda_{lambdaId}" : "NULL",
             _ => "0"
         };
     }
@@ -77,6 +78,9 @@ public sealed partial class CCodeGenerator
 
         if (_symbols.Globals.TryGetValue(name, out var gSym) && gSym.Scope == MemoryScope.Global)
             return $"g_globals.{name}";
+
+        if (_symbols.Functions.TryGetValue(name, out var fnSym) && !fnSym.IsBuiltin)
+            return $"psps_fn_{name}";
 
         return name;
     }
@@ -325,7 +329,9 @@ public sealed partial class CCodeGenerator
                 };
             }
 
-            if (receiverType is ActorRefType actorRef)
+            if (receiverType is ActorRefType actorRef &&
+                _symbols.Actors.TryGetValue(actorRef.ActorName, out var actorSym) &&
+                actorSym.Methods.ContainsKey(method))
             {
                 var argStrings = new List<string>(callExpr.Arguments.Count + 2);
                 if (memberAccess.Target is SelfExpr && ctx.CurrentActor is not null)
@@ -346,36 +352,90 @@ public sealed partial class CCodeGenerator
 
                 return $"{actorRef.ActorName}_{method}({string.Join(", ", argStrings)})";
             }
+
+            if (_model.GetTypeOrDefault(memberAccess) is FunctionType fieldFnType)
+            {
+                string fieldCallee = EmitFieldAccessExpr(memberAccess, ctx);
+                return EmitFunctionPointerCall(fieldCallee, fieldFnType, callExpr.Arguments, ctx);
+            }
         }
 
         if (callExpr.Callee is IdentifierExpr funcId)
         {
             string name = funcId.Name;
 
-            if (ctx.CurrentActor is not null && ctx.CurrentActor.Methods.ContainsKey(name))
+            if (ctx.FrameArenaPointerLocals.Contains(name) || ctx.LocalVariables.Contains(name))
             {
-                var args = new List<string> { "self", "self_ref" };
-                args.AddRange(callExpr.Arguments.Select(a => EmitExpr(a, ctx)));
-                return $"{ctx.CurrentActor.Name}_{name}({string.Join(", ", args)})";
+                if (_model.GetTypeOrDefault(funcId) is FunctionType localFnType)
+                {
+                    return EmitFunctionPointerCall(EmitIdentifierExpr(funcId, ctx), localFnType, callExpr.Arguments, ctx);
+                }
             }
 
-            if (ctx.CurrentState is not null && ctx.CurrentState.Methods.ContainsKey(name))
+            if (ctx.CurrentActor is not null)
             {
-                var args = new List<string> { "self" };
-                args.AddRange(callExpr.Arguments.Select(a => EmitExpr(a, ctx)));
-                return $"State_{ctx.CurrentState.Name}_{name}({string.Join(", ", args)})";
+                if (ctx.CurrentActor.Methods.ContainsKey(name))
+                {
+                    var args = new List<string> { "self", "self_ref" };
+                    args.AddRange(callExpr.Arguments.Select(a => EmitExpr(a, ctx)));
+                    return $"{ctx.CurrentActor.Name}_{name}({string.Join(", ", args)})";
+                }
+                if (ctx.CurrentActor.Fields.TryGetValue(name, out var actorField) && actorField.Type is FunctionType actorFnType)
+                {
+                    return EmitFunctionPointerCall($"self->{name}", actorFnType, callExpr.Arguments, ctx);
+                }
             }
 
-            if (_symbols.Functions.TryGetValue(name, out var fnSym) && fnSym.IsBuiltin)
+            if (ctx.CurrentState is not null)
             {
-                return EmitBuiltinIntrinsicCall(name, callExpr.Arguments, ctx);
+                if (ctx.CurrentState.Methods.ContainsKey(name))
+                {
+                    var args = new List<string> { "self" };
+                    args.AddRange(callExpr.Arguments.Select(a => EmitExpr(a, ctx)));
+                    return $"State_{ctx.CurrentState.Name}_{name}({string.Join(", ", args)})";
+                }
+                if (ctx.CurrentState.Fields.TryGetValue(name, out var stateField) && stateField.Type is FunctionType stateFnType)
+                {
+                    return EmitFunctionPointerCall($"self->{name}", stateFnType, callExpr.Arguments, ctx);
+                }
             }
 
-            string joinedArgs = string.Join(", ", callExpr.Arguments.Select(a => EmitExpr(a, ctx)));
-            return $"psps_fn_{name}({joinedArgs})";
+            if (_symbols.Functions.TryGetValue(name, out var fnSym))
+            {
+                if (fnSym.IsBuiltin)
+                {
+                    return EmitBuiltinIntrinsicCall(name, callExpr.Arguments, ctx);
+                }
+
+                string joinedArgs = string.Join(", ", callExpr.Arguments.Select(a => EmitExpr(a, ctx)));
+                return $"psps_fn_{name}({joinedArgs})";
+            }
+
+            if (_symbols.Globals.TryGetValue(name, out var globalVar) && globalVar.Type is FunctionType globalFnType)
+            {
+                return EmitFunctionPointerCall(EmitIdentifierExpr(funcId, ctx), globalFnType, callExpr.Arguments, ctx);
+            }
+
+            string fallbackArgs = string.Join(", ", callExpr.Arguments.Select(a => EmitExpr(a, ctx)));
+            return $"psps_fn_{name}({fallbackArgs})";
+        }
+
+        if (_model.GetTypeOrDefault(callExpr.Callee) is FunctionType exprFnType)
+        {
+            return EmitFunctionPointerCall(EmitExpr(callExpr.Callee, ctx), exprFnType, callExpr.Arguments, ctx);
         }
 
         return "0";
+    }
+
+    private string EmitFunctionPointerCall(string calleeCode, FunctionType fnType, IReadOnlyList<Expr> args, EmissionContext ctx)
+    {
+        string joinedArgs = string.Join(", ", args.Select(a => EmitExpr(a, ctx)));
+        if (fnType.ReturnType == ResolvedType.Void)
+        {
+            return $"(({calleeCode}) != NULL ? ({calleeCode})({joinedArgs}) : (void)0)";
+        }
+        return $"({calleeCode})({joinedArgs})";
     }
 
     private string EmitBuiltinIntrinsicCall(string name, IReadOnlyList<Expr> args, EmissionContext ctx)

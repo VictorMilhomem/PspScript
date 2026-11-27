@@ -6,6 +6,7 @@ actor Button[MAX_BUTTONS] {
     height: int
     action_id: int
     selected = false
+    on_click: fn() -> void = null
 
     on ButtonFocus(msg) {
         selected = (action_id == msg.focused_id)
@@ -16,17 +17,7 @@ actor Button[MAX_BUTTONS] {
             return
         }
 
-        match action_id {
-            ACT_PLAY => goto Match,
-            ACT_DIFFICULTY => {
-                cpu_difficulty = cpu_difficulty >= DIFF_HARD ? DIFF_EASY : cpu_difficulty + 1
-            },
-            ACT_RESET => {
-                player_wins = 0
-                save_game()
-            },
-            _ => {}
-        }
+        on_click()
     }
 
     draw() {

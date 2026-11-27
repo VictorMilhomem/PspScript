@@ -563,6 +563,49 @@ fn season_speed(s: Season) -> f32 {
 }
 ```
 
+### First-Class Function Types & Zero-Heap Lambdas
+
+PSPScript supports **function types** (`fn(T1, T2) -> R` or `fn()` shorthand for `fn() -> void`) and **non-capturing arrow lambdas** that compile directly to static 4-byte C99 function pointers with zero heap allocation:
+
+```pspscript
+actor Button[4] {
+    on_click: fn() -> void = null
+
+    on ButtonPress(msg) {
+        // Calling a void function pointer is null-safe on PSP hardware
+        on_click()
+    }
+}
+
+fn apply_curve(t: f32, ease: fn(f32) -> f32) -> f32 {
+    return ease(t)
+}
+
+fn linear(x: f32) -> f32 {
+    return x
+}
+
+state MainMenu {
+    init() {
+        // Single-statement and block lambdas
+        spawn Button { on_click: () => goto Match }
+        spawn Button {
+            on_click: () => {
+                player_wins = 0
+                save_game()
+            }
+        }
+
+        // Contextual parameter type inference & named functions as values
+        var eased = apply_curve(0.5, (t) => t * t)
+        var same  = apply_curve(0.5, linear)
+    }
+}
+```
+
+- **Zero-heap non-capturing**: Lambdas cannot capture enclosing local variables or `self` (attempting to do so produces a clear compile-time error). They can freely access their own parameters, `const` values, `global`/`level` variables, `asset` handles, singleton actors, and `goto` transitions.
+- **Null-safe `void` callbacks**: Function-typed fields and variables accept `null` and support `== null` / `!= null`. Calling a `void`-returning function pointer automatically guards against `NULL` in C99 so an unset callback never crashes PSP hardware.
+
 ---
 
 ## 11. Built-In PSP Runtime Functions, Input & Standard Library

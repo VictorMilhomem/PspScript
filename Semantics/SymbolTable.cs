@@ -173,19 +173,29 @@ public sealed class LexicalScope
     public StateSymbol? EnclosingState { get; }
     public ResolvedType ExpectedReturnType { get; }
     public bool IsInsideLoop { get; }
+    public bool IsInsideLambda { get; }
+    public LexicalScope? OuterScopeForCaptureCheck { get; }
+    public bool InferReturnType { get; }
+    public ResolvedType? InferredReturnType { get; set; }
 
     public LexicalScope(
         LexicalScope? parent,
         ActorSymbol? enclosingActor = null,
         StateSymbol? enclosingState = null,
         ResolvedType? expectedReturnType = null,
-        bool? isInsideLoop = null)
+        bool? isInsideLoop = null,
+        bool? isInsideLambda = null,
+        LexicalScope? outerScopeForCaptureCheck = null,
+        bool? inferReturnType = null)
     {
         Parent = parent;
         EnclosingActor = enclosingActor ?? parent?.EnclosingActor;
         EnclosingState = enclosingState ?? parent?.EnclosingState;
         ExpectedReturnType = expectedReturnType ?? parent?.ExpectedReturnType ?? ResolvedType.Void;
         IsInsideLoop = isInsideLoop ?? parent?.IsInsideLoop ?? false;
+        IsInsideLambda = isInsideLambda ?? parent?.IsInsideLambda ?? false;
+        OuterScopeForCaptureCheck = outerScopeForCaptureCheck ?? parent?.OuterScopeForCaptureCheck;
+        InferReturnType = inferReturnType ?? parent?.InferReturnType ?? false;
     }
 
     public bool TryDeclareLocal(VariableSymbol symbol)
@@ -205,8 +215,54 @@ public sealed class LexicalScope
         return false;
     }
 
+    public bool TryLookupOuterCaptured(string name, out string? sourceKind)
+    {
+        var outer = OuterScopeForCaptureCheck;
+        while (outer is not null)
+        {
+            if (outer.TryLookupLocal(name, out _))
+            {
+                sourceKind = "local variable";
+                return true;
+            }
+            if (outer.EnclosingActor is not null && outer.EnclosingActor.Fields.ContainsKey(name))
+            {
+                sourceKind = $"field of actor '{outer.EnclosingActor.Name}'";
+                return true;
+            }
+            if (outer.EnclosingState is not null && outer.EnclosingState.Fields.ContainsKey(name))
+            {
+                sourceKind = $"field of state '{outer.EnclosingState.Name}'";
+                return true;
+            }
+            outer = outer.OuterScopeForCaptureCheck;
+        }
+        sourceKind = null;
+        return false;
+    }
+
+    public LexicalScope RootLambdaScope
+    {
+        get
+        {
+            var cur = this;
+            while (cur.Parent is not null && cur.Parent.IsInsideLambda)
+                cur = cur.Parent;
+            return cur;
+        }
+    }
+
     public LexicalScope CreateChild(ResolvedType? overrideReturnType = null, bool? isInsideLoop = null) =>
-        new(this, EnclosingActor, EnclosingState, overrideReturnType ?? ExpectedReturnType, isInsideLoop);
+        new(
+            this,
+            EnclosingActor,
+            EnclosingState,
+            overrideReturnType ?? ExpectedReturnType,
+            isInsideLoop,
+            IsInsideLambda,
+            OuterScopeForCaptureCheck,
+            InferReturnType
+        );
 }
 
 
@@ -254,6 +310,7 @@ public sealed class SymbolTable
             EnumType => 4,     // 32-bit int32_t enum value
             ActorRefType => 4, // 32-bit generational handle (16-bit index + 16-bit generation)
             AssetType => 4,    // 32-bit static asset table index / pointer
+            FunctionType => 4, // 32-bit C99 function pointer on MIPS
             FixedArrayType arr => Math.Max(0, arr.Length) * EstimateTypeByteSize(arr.ElementType, visitedStructs),
             StructType st when Structs.TryGetValue(st.Name, out var structSym) =>
                 EstimateStructByteSize(structSym, visitedStructs),

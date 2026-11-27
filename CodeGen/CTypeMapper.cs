@@ -42,17 +42,41 @@ internal static class CTypeMapper
             current = arr.ElementType;
         }
 
-        string baseType = FormatCType(current);
-        if (dimensions.Count == 0)
-            return $"{baseType} {identifier}";
-
-        var sb = new StringBuilder();
-        sb.Append(baseType).Append(' ').Append(identifier);
+        var dimSuffix = new StringBuilder();
         foreach (int dim in dimensions)
         {
-            sb.Append('[').Append(dim.ToString(CultureInfo.InvariantCulture)).Append(']');
+            dimSuffix.Append('[').Append(dim.ToString(CultureInfo.InvariantCulture)).Append(']');
         }
-        return sb.ToString();
+
+        if (current is FunctionType fnType)
+        {
+            return FormatFunctionPointerDeclaration(fnType, $"{identifier}{dimSuffix}");
+        }
+
+        string baseType = FormatCType(current);
+        return $"{baseType} {identifier}{dimSuffix}";
+    }
+
+    public static string FormatFunctionPointerDeclaration(FunctionType fnType, string declarator)
+    {
+        string paramList = fnType.ParameterTypes.Count == 0
+            ? "void"
+            : string.Join(", ", fnType.ParameterTypes.Select(FormatFunctionParamType));
+
+        if (fnType.ReturnType is FunctionType retFn)
+        {
+            return FormatFunctionPointerDeclaration(retFn, $"(*{declarator})({paramList})");
+        }
+
+        string retType = FormatCType(fnType.ReturnType);
+        return $"{retType} (*{declarator})({paramList})";
+    }
+
+    private static string FormatFunctionParamType(ResolvedType paramType)
+    {
+        if (paramType is FunctionType nestedFn)
+            return FormatFunctionPointerDeclaration(nestedFn, string.Empty);
+        return FormatCType(paramType);
     }
 
     public static string FormatDefaultValue(ResolvedType type) => type switch
@@ -67,6 +91,7 @@ internal static class CTypeMapper
         PrimitiveType { Kind: PrimitiveKind.Color } => "PSPS_COLOR_WHITE",
         PrimitiveType { Kind: PrimitiveKind.Timer } => "psps_timer_make(0.0f)",
         ActorRefType => "PSPS_NULL_REF",
+        FunctionType => "NULL",
         StructType st => $"({st.Name}_t){{ 0 }}",
         EnumType en => $"({en.Name}_t)0",
         _ => "0"
@@ -74,7 +99,6 @@ internal static class CTypeMapper
 
     public static string FormatFunctionSignature(ActorSymbol? ownerActor, FunctionSymbol fn)
     {
-        string retType = FormatCType(fn.ReturnType);
         string funcName = ownerActor is not null
             ? $"{ownerActor.Name}_{fn.Name}"
             : $"psps_fn_{fn.Name}";
@@ -92,12 +116,15 @@ internal static class CTypeMapper
         }
 
         string paramsFormatted = paramList.Count > 0 ? string.Join(", ", paramList) : "void";
-        return $"static {retType} {funcName}({paramsFormatted})";
+        if (fn.ReturnType is FunctionType retFn)
+        {
+            return $"static {FormatFunctionPointerDeclaration(retFn, $"{funcName}({paramsFormatted})")}";
+        }
+        return $"static {FormatCType(fn.ReturnType)} {funcName}({paramsFormatted})";
     }
 
     public static string FormatStateMethodSignature(StateSymbol ownerState, FunctionSymbol fn)
     {
-        string retType = FormatCType(fn.ReturnType);
         string funcName = $"State_{ownerState.Name}_{fn.Name}";
 
         var paramList = new List<string> { $"State_{ownerState.Name}_t* self" };
@@ -106,7 +133,30 @@ internal static class CTypeMapper
             paramList.Add(FormatFieldDeclaration(param.Type, param.Name));
         }
 
-        return $"static {retType} {funcName}({string.Join(", ", paramList)})";
+        string paramsFormatted = string.Join(", ", paramList);
+        if (fn.ReturnType is FunctionType retFn)
+        {
+            return $"static {FormatFunctionPointerDeclaration(retFn, $"{funcName}({paramsFormatted})")}";
+        }
+        return $"static {FormatCType(fn.ReturnType)} {funcName}({paramsFormatted})";
+    }
+
+    public static string FormatLambdaSignature(int id, PspScript.Ast.LambdaExpr lambda, FunctionType fnType)
+    {
+        var paramList = new List<string>(lambda.Parameters.Count);
+        for (int i = 0; i < lambda.Parameters.Count; i++)
+        {
+            var pType = i < fnType.ParameterTypes.Count ? fnType.ParameterTypes[i] : ResolvedType.Int;
+            paramList.Add(FormatFieldDeclaration(pType, lambda.Parameters[i].Name));
+        }
+
+        string paramsFormatted = paramList.Count > 0 ? string.Join(", ", paramList) : "void";
+        string funcName = $"psps_lambda_{id}";
+        if (fnType.ReturnType is FunctionType retFn)
+        {
+            return $"static {FormatFunctionPointerDeclaration(retFn, $"{funcName}({paramsFormatted})")}";
+        }
+        return $"static {FormatCType(fnType.ReturnType)} {funcName}({paramsFormatted})";
     }
 
     public static string EscapeCString(string text)

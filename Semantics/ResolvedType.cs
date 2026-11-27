@@ -76,8 +76,8 @@ public abstract record ResolvedType
         if (source == target)
             return true;
 
-        // null can be assigned to any generational actor handle ref<T>
-        if (source is NullType && target is ActorRefType)
+        // null can be assigned to any generational actor handle ref<T> or function type fn(...)
+        if (source is NullType && (target is ActorRefType or FunctionType))
             return true;
 
         if (source is PrimitiveType srcPrim && target is PrimitiveType dstPrim)
@@ -164,6 +164,31 @@ public sealed record FunctionType(
 {
     public override string DisplayName =>
         $"fn({string.Join(", ", ParameterTypes.Select(static p => p.DisplayName))}) -> {ReturnType.DisplayName}";
+
+    public bool Equals(FunctionType? other)
+    {
+        if (ReferenceEquals(this, other)) return true;
+        if (other is null) return false;
+        if (IsVariadic != other.IsVariadic) return false;
+        if (ReturnType != other.ReturnType) return false;
+        if (ParameterTypes.Count != other.ParameterTypes.Count) return false;
+        for (int i = 0; i < ParameterTypes.Count; i++)
+        {
+            if (ParameterTypes[i] != other.ParameterTypes[i])
+                return false;
+        }
+        return true;
+    }
+
+    public override int GetHashCode()
+    {
+        var hash = new HashCode();
+        hash.Add(ReturnType);
+        hash.Add(IsVariadic);
+        foreach (var p in ParameterTypes)
+            hash.Add(p);
+        return hash.ToHashCode();
+    }
 }
 
 
