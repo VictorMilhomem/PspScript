@@ -1,9 +1,9 @@
 import "../shared/assets"
 
 actor ChickenHouse {
-    pos: vec2 = { 216.0, 112.0 }
-    speed: f32 = 140.0
-    tint: color = #FFFFFF
+    pos = vec2(216.0, 112.0)
+    speed = 140.0
+    tint = #FFFFFF
 
     on CycleTint(msg) {
         active_tint_index += msg.step
@@ -11,14 +11,11 @@ actor ChickenHouse {
             active_tint_index = 0
         }
 
-        if active_tint_index == 0 {
-            tint = #FFFFFF
-        } else if active_tint_index == 1 {
-            tint = #00E5FF
-        } else if active_tint_index == 2 {
-            tint = #FFF275
-        } else {
-            tint = #FF6B9D
+        tint = match active_tint_index {
+            0 => #FFFFFF,
+            1 => #00E5FF,
+            2 => #FFF275,
+            _ => #FF6B9D
         }
     }
 
@@ -41,8 +38,8 @@ actor ChickenHouse {
 
 actor Egg[8] {
     pos: vec2
-    bob_phase: f32 = 0.0
-    base_y: f32 = 120.0
+    bob_phase = 0.0
+    base_y = 120.0
 
     init() {
         base_y = pos.y

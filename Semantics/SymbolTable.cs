@@ -412,6 +412,21 @@ public sealed class SymbolTable
             new ParamSymbol("b", ResolvedType.F32),
             new ParamSymbol("t", ResolvedType.F32));
 
+        RegisterBuiltin("vec2", ResolvedType.Vec2, isVariadic: false,
+            new ParamSymbol("x", ResolvedType.F32),
+            new ParamSymbol("y", ResolvedType.F32));
+
+        RegisterBuiltin("vec3", ResolvedType.Vec3, isVariadic: false,
+            new ParamSymbol("x", ResolvedType.F32),
+            new ParamSymbol("y", ResolvedType.F32),
+            new ParamSymbol("z", ResolvedType.F32));
+
+        RegisterBuiltin("rect", ResolvedType.Rect, isVariadic: false,
+            new ParamSymbol("x", ResolvedType.F32),
+            new ParamSymbol("y", ResolvedType.F32),
+            new ParamSymbol("w", ResolvedType.F32),
+            new ParamSymbol("h", ResolvedType.F32));
+
         RegisterBuiltin("print", ResolvedType.Void, isVariadic: true,
             new ParamSymbol("value", ResolvedType.Any));
     }

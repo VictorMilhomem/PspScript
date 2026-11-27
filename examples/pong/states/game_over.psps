@@ -1,7 +1,7 @@
 import "../shared/constants"
 
 state GameOver {
-    rematch_timer: timer = 5.0s
+    rematch_timer = 5.0s
 
     update(dt: f32) {
         if button_pressed(BTN_CROSS) {
@@ -20,11 +20,10 @@ state GameOver {
     draw() {
         clear_screen(#070A14)
 
-        if last_winner_is_player {
-            draw_text("YOU WIN!", { 176.0, 88.0 }, #00E5FF, 2)
-        } else {
-            draw_text("CPU WINS!", { 168.0, 88.0 }, #FF2A6D, 2)
-        }
+        var banner = last_winner_is_player ? "YOU WIN!" : "CPU WINS!"
+        var banner_x = last_winner_is_player ? 176.0 : 168.0
+        var banner_color = last_winner_is_player ? #00E5FF : #FF2A6D
+        draw_text(banner, vec2(banner_x, 88.0), banner_color, 2)
 
         draw_text("TOTAL WINS:", { 184.0, 128.0 }, #FFFFFF, 1)
         draw_number(player_wins, { 280.0, 128.0 }, #FFF275, 1)

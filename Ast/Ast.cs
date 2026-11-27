@@ -112,7 +112,7 @@ public record ParamDecl(string Name, TypeRef Type): AstNode;
 
 public record FieldDecl(
     string Name,
-    TypeRef Type,
+    TypeRef? Type,
     Expr? DefaultValue
 
 ): AstNode;
@@ -210,9 +210,19 @@ public record MatchStmt(
 ) : Stmt;
 
 public record MatchArm(
-    MatchPattern Pattern,
+    IReadOnlyList<MatchPattern> Patterns,
     Stmt Body
 ) : AstNode;
+
+public record MatchExprArm(
+    IReadOnlyList<MatchPattern> Patterns,
+    Expr Value
+) : AstNode;
+
+public record MatchExpr(
+    Expr Scrutinee,
+    IReadOnlyList<MatchExprArm> Arms
+) : Expr;
 
 public abstract record MatchPattern : AstNode;
 public record EnumVariantPattern(string EnumName, string VariantName) : MatchPattern;
@@ -229,13 +239,14 @@ public record ForStmt(
 ) : Stmt;
 
 /// <summary>
-/// Exclusive integer range loop: for i in start..end { ... }
+/// Integer range loop: for i in start..end { ... } (exclusive) or start..=end (inclusive)
 /// </summary>
 public record ForRangeStmt(
     string IteratorName,
     Expr Start,
     Expr End,
-    BlockStmt Body
+    BlockStmt Body,
+    bool IsInclusive = false
 ) : Stmt;
 
 /// <summary>
@@ -248,6 +259,8 @@ public record ForEachStmt(
 ) : Stmt;
 
 public record BreakStmt() : Stmt;
+
+public record ContinueStmt() : Stmt;
 
 public record ReturnStmt(Expr? Value) : Stmt;
 
@@ -310,6 +323,8 @@ public enum UnaryOp
 }
 
 public record BinaryExpr(Expr Left, BinaryOp Op, Expr Right): Expr;
+
+public record TernaryExpr(Expr Condition, Expr WhenTrue, Expr WhenFalse): Expr;
 
 public enum BinaryOp
 {

@@ -65,7 +65,7 @@ ActorRefType   ::= "ref" "<" IDENT ">" // 32-bit generational handle
 ArrayType      ::= "[" ConstExpr "]" Type   // Fixed-size arrays only (no dynamic heap)
 
 GlobalVarDecl  ::= ("level" | "global")? "var" IDENT (":" Type)? ("=" Expr)?
-FieldDecl      ::= IDENT ":" Type ("=" Expr)?
+FieldDecl      ::= IDENT (":" Type ("=" Expr)? | "=" Expr)
 FieldList      ::= FieldDecl (("," | NEWLINE) FieldDecl)*
 
 LocalVarDecl   ::= "temp"? "var" IDENT (":" Type)? ("=" Expr)?
@@ -83,6 +83,7 @@ Stmt           ::= LocalVarDecl
                  | ForRangeStmt
                  | ForEachStmt
                  | BreakStmt
+                 | ContinueStmt
                  | ReturnStmt
                  | SendStmt
                  | SpawnStmt
@@ -109,16 +110,20 @@ ForEachStmt    ::= "each" IDENT "in" IDENT Block
 
 IfStmt         ::= "if" Expr Block ("else" (IfStmt | Block))?
 MatchStmt      ::= "match" Expr "{" MatchArm* "}"
-MatchArm       ::= MatchPattern "=>" (Block | Stmt) ","?
+MatchArm       ::= MatchPattern ("|" MatchPattern)* "=>" (Block | Stmt) ","?
+MatchExpr      ::= "match" Expr "{" MatchExprArm* "}"
+MatchExprArm   ::= MatchPattern ("|" MatchPattern)* "=>" Expr ","?
 MatchPattern   ::= "_" | IDENT "." IDENT | "-"? INT | IDENT
 ForStmt        ::= "for" Expr Block
-ForRangeStmt   ::= "for" IDENT "in" Expr ".." Expr Block
+ForRangeStmt   ::= "for" IDENT "in" Expr (".." | "..=") Expr Block
 BreakStmt      ::= "break"
+ContinueStmt   ::= "continue"
 ReturnStmt     ::= "return" Expr?
 AssignStmt     ::= Expr ("=" | "+=" | "-=" | "*=" | "/=" | "&=" | "|=" | "^=" | "<<=" | ">>=") Expr
 ExprStmt       ::= Expr
 
-Expr           ::= LogicOr
+Expr           ::= Ternary
+Ternary        ::= LogicOr ("?" Expr ":" Ternary)?
 LogicOr        ::= LogicAnd ("||" LogicAnd)*
 LogicAnd       ::= BitOr ("&&" BitOr)*
 BitOr          ::= BitXor ("|" BitXor)*

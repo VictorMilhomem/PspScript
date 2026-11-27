@@ -58,7 +58,7 @@ public static class LspCompletionProvider
         "import", "game", "asset", "const", "message", "struct", "enum", "actor", "state",
         "global", "level", "temp", "var", "fn",
         "init", "update", "draw", "exit", "on",
-        "if", "else", "match", "for", "each", "in", "break", "return",
+        "if", "else", "match", "for", "each", "in", "break", "continue", "return",
         "send", "spawn", "destroy", "goto",
         "true", "false", "null", "self"
     ];
@@ -131,6 +131,9 @@ public static class LspCompletionProvider
         ["max"] = new("fn max(a: f32, b: f32) -> f32", "Returns the larger of `a` and `b`.", ["a: f32", "b: f32"]),
         ["clamp"] = new("fn clamp(val: f32, low: f32, high: f32) -> f32", "Clamps `val` into `[low, high]`.", ["val: f32", "low: f32", "high: f32"]),
         ["lerp"] = new("fn lerp(a: f32, b: f32, t: f32) -> f32", "Linearly interpolates between `a` and `b` by `t`.", ["a: f32", "b: f32", "t: f32"]),
+        ["vec2"] = new("fn vec2(x: f32, y: f32) -> vec2", "Constructs a 2D single-precision vector (`vec2`).", ["x: f32", "y: f32"]),
+        ["vec3"] = new("fn vec3(x: f32, y: f32, z: f32) -> vec3", "Constructs a 3D single-precision vector (`vec3`).", ["x: f32", "y: f32", "z: f32"]),
+        ["rect"] = new("fn rect(x: f32, y: f32, w: f32, h: f32) -> rect", "Constructs a 2D axis-aligned rectangle (`rect`).", ["x: f32", "y: f32", "w: f32", "h: f32"]),
         ["print"] = new("fn print(value: any) -> void", "Prints a debug line to stdout.", ["value: any"]),
         ["texture"] = new("texture(path: string[, format: ABGR8888 | RGBA4444])",
             "Compile-time PNG texture/spritesheet baker.",
@@ -766,6 +769,7 @@ public static class LspCompletionProvider
             : f.LengthExpr is IdentifierExpr id
                 ? $"[{id.Name}]{FormatTypeRef(f.ElementType)}"
                 : $"[...]{FormatTypeRef(f.ElementType)}",
+        null => "inferred",
         _ => "any"
     };
 

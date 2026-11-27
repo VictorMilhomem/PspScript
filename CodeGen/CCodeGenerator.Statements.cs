@@ -66,6 +66,10 @@ public sealed partial class CCodeGenerator
                 _writer.WriteLine("break;");
                 break;
 
+            case ContinueStmt:
+                _writer.WriteLine("continue;");
+                break;
+
             case ReturnStmt returnStmt:
                 if (returnStmt.Value is null)
                 {
@@ -227,26 +231,26 @@ public sealed partial class CCodeGenerator
 
         foreach (var arm in matchStmt.Arms)
         {
-            string caseHeader = arm.Pattern switch
+            var labels = new List<string>(arm.Patterns.Count);
+            foreach (var pat in arm.Patterns)
             {
-                EnumVariantPattern ev => $"case {ev.EnumName}_{ev.VariantName}:",
-                IntLiteralPattern il => $"case {il.Value}:",
-                ConstPattern cp when _model.ResolvedConstPatterns.TryGetValue(cp, out var cv) => cv switch
+                if (pat is WildcardPattern)
                 {
-                    IntConstValue icv => $"case {icv.Value}:",
-                    EnumConstValue ecv => $"case {ecv.EnumName}_{ecv.VariantName}:",
-                    _ => "default:"
-                },
-                WildcardPattern => "default:",
-                _ => "default:"
-            };
-
-            if (arm.Pattern is WildcardPattern)
-            {
-                hasDefault = true;
+                    hasDefault = true;
+                    labels.Add("default:");
+                }
+                else
+                {
+                    labels.Add($"case {FormatMatchPatternC(pat)}:");
+                }
             }
 
-            _writer.OpenBlock(caseHeader);
+            for (int li = 0; li < labels.Count - 1; li++)
+            {
+                _writer.WriteLine(labels[li]);
+            }
+
+            _writer.OpenBlock(labels[^1]);
             if (arm.Body is BlockStmt block)
             {
                 EmitBlockStatements(block, ctx);
@@ -272,6 +276,7 @@ public sealed partial class CCodeGenerator
         string startExpr = EmitExpr(forRangeStmt.Start, ctx);
         string endExpr = EmitExpr(forRangeStmt.End, ctx);
 
+        string cmpOp = forRangeStmt.IsInclusive ? "<=" : "<";
         bool needsEndTemp = forRangeStmt.End is not (IntLiteralExpr or IdentifierExpr);
         if (needsEndTemp)
         {
@@ -279,7 +284,7 @@ public sealed partial class CCodeGenerator
             string endVar = $"_range_end_{loopId}";
             _writer.OpenBlock();
             _writer.WriteLine($"int32_t {endVar} = (int32_t)({endExpr});");
-            _writer.OpenBlock($"for (int32_t {forRangeStmt.IteratorName} = (int32_t)({startExpr}); {forRangeStmt.IteratorName} < {endVar}; ++{forRangeStmt.IteratorName})");
+            _writer.OpenBlock($"for (int32_t {forRangeStmt.IteratorName} = (int32_t)({startExpr}); {forRangeStmt.IteratorName} {cmpOp} {endVar}; ++{forRangeStmt.IteratorName})");
             _writer.WriteLine($"(void){forRangeStmt.IteratorName};");
 
             var loopCtx = ctx.Clone();
@@ -291,7 +296,7 @@ public sealed partial class CCodeGenerator
         }
         else
         {
-            _writer.OpenBlock($"for (int32_t {forRangeStmt.IteratorName} = (int32_t)({startExpr}); {forRangeStmt.IteratorName} < (int32_t)({endExpr}); ++{forRangeStmt.IteratorName})");
+            _writer.OpenBlock($"for (int32_t {forRangeStmt.IteratorName} = (int32_t)({startExpr}); {forRangeStmt.IteratorName} {cmpOp} (int32_t)({endExpr}); ++{forRangeStmt.IteratorName})");
             _writer.WriteLine($"(void){forRangeStmt.IteratorName};");
 
             var loopCtx = ctx.Clone();

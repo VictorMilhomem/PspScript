@@ -26,6 +26,8 @@ public sealed partial class CCodeGenerator
             IdentifierExpr idExpr => EmitIdentifierExpr(idExpr, ctx),
             UnaryExpr unaryExpr => EmitUnaryExpr(unaryExpr, ctx),
             BinaryExpr binaryExpr => EmitBinaryExpr(binaryExpr, ctx),
+            TernaryExpr ternaryExpr => $"(({EmitExpr(ternaryExpr.Condition, ctx)}) ? ({EmitExpr(ternaryExpr.WhenTrue, ctx)}) : ({EmitExpr(ternaryExpr.WhenFalse, ctx)}))",
+            MatchExpr matchExpr => EmitMatchExpr(matchExpr, ctx),
             FieldAccessExpr fieldExpr => EmitFieldAccessExpr(fieldExpr, ctx),
             IndexAccessExpr indexExpr => $"{EmitExpr(indexExpr.Target, ctx)}[{EmitExpr(indexExpr.Index, ctx)}]",
             CallExpr callExpr => EmitCallExpr(callExpr, ctx),
@@ -454,11 +456,62 @@ public sealed partial class CCodeGenerator
             "lerp" when emitted.Count == 3 =>
                 $"((float)({emitted[0]}) + ((float)({emitted[1]}) - (float)({emitted[0]})) * (float)({emitted[2]}))",
 
+            "vec2" when emitted.Count == 2 =>
+                $"vec2_make((float)({emitted[0]}), (float)({emitted[1]}))",
+            "vec3" when emitted.Count == 3 =>
+                $"vec3_make((float)({emitted[0]}), (float)({emitted[1]}), (float)({emitted[2]}))",
+            "rect" when emitted.Count == 4 =>
+                $"rect_make((float)({emitted[0]}), (float)({emitted[1]}), (float)({emitted[2]}), (float)({emitted[3]}))",
+
             "print" when emitted.Count >= 1 =>
                 $"printf(\"%s\\n\", {emitted[0]})",
 
             _ => $"/* intrinsic {name} */ (void)0"
         };
+    }
+
+    private string FormatMatchPatternC(MatchPattern pattern) => pattern switch
+    {
+        EnumVariantPattern ev => $"{ev.EnumName}_{ev.VariantName}",
+        IntLiteralPattern il => il.Value.ToString(CultureInfo.InvariantCulture),
+        ConstPattern cp when _model.ResolvedConstPatterns.TryGetValue(cp, out var cv) => cv switch
+        {
+            IntConstValue icv => icv.Value.ToString(CultureInfo.InvariantCulture),
+            EnumConstValue ecv => $"{ecv.EnumName}_{ecv.VariantName}",
+            _ => "0"
+        },
+        _ => "0"
+    };
+
+    private string EmitMatchExpr(MatchExpr matchExpr, EmissionContext ctx)
+    {
+        if (matchExpr.Arms.Count == 0)
+            return "0";
+
+        if (matchExpr.Arms.Count == 1)
+            return $"({EmitExpr(matchExpr.Arms[0].Value, ctx)})";
+
+        string scrutineeCode = EmitExpr(matchExpr.Scrutinee, ctx);
+        string acc = $"({EmitExpr(matchExpr.Arms[^1].Value, ctx)})";
+
+        for (int i = matchExpr.Arms.Count - 2; i >= 0; i--)
+        {
+            var arm = matchExpr.Arms[i];
+            string armVal = EmitExpr(arm.Value, ctx);
+            if (arm.Patterns.Any(static p => p is WildcardPattern))
+            {
+                acc = $"({armVal})";
+                continue;
+            }
+
+            string cond = string.Join(
+                " || ",
+                arm.Patterns.Select(p => $"(({scrutineeCode}) == {FormatMatchPatternC(p)})")
+            );
+            acc = $"(({cond}) ? ({armVal}) : ({acc}))";
+        }
+
+        return acc;
     }
 
     private static string FormatConstValueC(ResolvedType type, ConstValue value)

@@ -1,13 +1,13 @@
 import "../shared/assets"
 
 actor Chicken[6] {
-    pos: vec2 = { 120.0, 120.0 }
-    vel: vec2 = { 0.0, 0.0 }
-    walking: bool = false
-    frame: int = 0
-    anim_timer: timer = 180ms
-    ai_timer: timer = 1.2s
-    seed: int = 0
+    pos = vec2(120.0, 120.0)
+    vel = vec2(0.0, 0.0)
+    walking = false
+    frame = 0
+    anim_timer = 180ms
+    ai_timer = 1.2s
+    seed = 0
 
     on Startle(msg) {
         temp var away: vec2 = pos - msg.from_pos
@@ -45,28 +45,15 @@ actor Chicken[6] {
         }
 
         if anim_timer.elapsed() {
-            frame += 1
-            if walking {
-                if frame >= 4 {
-                    frame = 0
-                }
-            } else {
-                if frame >= 2 {
-                    frame = 0
-                }
-            }
+            var max_frames = walking ? 4 : 2
+            frame = frame + 1 >= max_frames ? 0 : frame + 1
             anim_timer = 180ms
         }
     }
 
     draw() {
         set_camera_enabled(true)
-        var row: int = 0
-        if walking {
-            row = 1
-        }
-        var src_x: f32 = frame * 16
-        var src_y: f32 = row * 16
-        draw_subsprite(chicken_sheet, { src_x, src_y, 16.0, 16.0 }, pos)
+        var row = walking ? 1 : 0
+        draw_subsprite(chicken_sheet, rect(frame * 16, row * 16, 16.0, 16.0), pos)
     }
 }

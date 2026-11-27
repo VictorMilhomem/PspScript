@@ -17,7 +17,7 @@ public static class PspParser
         "init", "update", "draw", "exit", "on",
         "int", "u8", "u16", "u32", "f32", "bool", "void",
         "vec2", "vec3", "rect", "color", "timer", "ref",
-        "if", "else", "match", "for", "each", "in", "break", "return",
+        "if", "else", "match", "for", "each", "in", "break", "continue", "return",
         "send", "spawn", "destroy", "goto",
         "true", "false", "null", "self"
     };
@@ -115,7 +115,7 @@ public static class PspParser
             FieldDecl fd => fd with
             {
                 Span = span,
-                Type = (TypeRef)StampNode(fd.Type, filePath),
+                Type = fd.Type is not null ? (TypeRef)StampNode(fd.Type, filePath) : null,
                 DefaultValue = fd.DefaultValue is not null ? (Expr)StampNode(fd.DefaultValue, filePath) : null
             },
             LifecycleHook lh => lh with
@@ -179,8 +179,20 @@ public static class PspParser
             MatchArm ma => ma with
             {
                 Span = span,
-                Pattern = (MatchPattern)StampNode(ma.Pattern, filePath),
+                Patterns = ma.Patterns.Select(p => (MatchPattern)StampNode(p, filePath)).ToList(),
                 Body = (Stmt)StampNode(ma.Body, filePath)
+            },
+            MatchExpr me => me with
+            {
+                Span = span,
+                Scrutinee = (Expr)StampNode(me.Scrutinee, filePath),
+                Arms = me.Arms.Select(a => (MatchExprArm)StampNode(a, filePath)).ToList()
+            },
+            MatchExprArm mea => mea with
+            {
+                Span = span,
+                Patterns = mea.Patterns.Select(p => (MatchPattern)StampNode(p, filePath)).ToList(),
+                Value = (Expr)StampNode(mea.Value, filePath)
             },
             ForStmt fs => fs with
             {
@@ -241,6 +253,13 @@ public static class PspParser
                 Span = span,
                 Left = (Expr)StampNode(be.Left, filePath),
                 Right = (Expr)StampNode(be.Right, filePath)
+            },
+            TernaryExpr te => te with
+            {
+                Span = span,
+                Condition = (Expr)StampNode(te.Condition, filePath),
+                WhenTrue = (Expr)StampNode(te.WhenTrue, filePath),
+                WhenFalse = (Expr)StampNode(te.WhenFalse, filePath)
             },
             CallExpr ce => ce with
             {
@@ -434,6 +453,58 @@ public static class PspParser
         var strExpr = stringLiteral.Then<Expr>(static (context, s) => new StringLiteralExpr(s));
         var idExpr = identifier.Then<Expr>(static (context, name) => new IdentifierExpr(name));
 
+        // Match patterns (shared by match statements and match expressions)
+        var wildcardPattern = Keyword("_")
+            .Then<MatchPattern>(static (context, _) => new WildcardPattern());
+
+        var enumVariantPattern = identifier
+            .AndSkip(Terms.Char('.'))
+            .And(identifier.ElseError("Expected enum variant name after '.'"))
+            .Then<MatchPattern>(static (context, x) => new EnumVariantPattern(x.Item1, x.Item2));
+
+        var signedIntPattern = Terms.Char('-').ThenElse(static (_, _) => true, false)
+            .And(intLiteral)
+            .Then<MatchPattern>(static (context, x) => new IntLiteralPattern(x.Item1 ? -x.Item2 : x.Item2));
+
+        var constPattern = identifier
+            .Then<MatchPattern>(static (context, name) => new ConstPattern(name));
+
+        var matchPattern = WithSpan(OneOf(wildcardPattern, enumVariantPattern, signedIntPattern, constPattern));
+
+        var matchPatternList = Separated(
+            Not(Terms.Text("||")).SkipAnd(Terms.Char('|')),
+            matchPattern,
+            min: 1
+        );
+
+        var matchExprArm = WithSpan(matchPatternList
+            .AndSkip(Terms.Text("=>").ElseError("Expected '=>' after match pattern"))
+            .And(expr)
+            .AndSkip(ZeroOrOne(Terms.Char(',')))
+            .Then(static (context, x) => new MatchExprArm(x.Item1, x.Item2)));
+
+        var matchExpr = Keyword("match")
+            .SkipAnd(expr)
+            .And(Between(
+                Terms.Char('{'),
+                ZeroOrMany(matchExprArm),
+                Terms.Char('}').ElseError("Expected '}' closing match expression")
+            ))
+            .Then<Expr>(static (context, x) => new MatchExpr(x.Item1, x.Item2));
+
+        // Typed game constructors: vec2(x, y), vec3(x, y, z), rect(x, y, w, h)
+        var gameTypeCtorExpr = OneOf(
+                Keyword("vec2").Then(static (_, _) => "vec2"),
+                Keyword("vec3").Then(static (_, _) => "vec3"),
+                Keyword("rect").Then(static (_, _) => "rect")
+            )
+            .And(Between(
+                Terms.Char('('),
+                Separated(Terms.Char(','), expr, min: 0),
+                Terms.Char(')').ElseError("Expected ')' closing constructor arguments")
+            ))
+            .Then<Expr>(static (context, x) => new CallExpr(new IdentifierExpr(x.Item1), x.Item2));
+
         // { x, y } or { x, y, z }
         var vecLiteralExpr = Between(
                 Terms.Char('{'),
@@ -449,6 +520,8 @@ public static class PspParser
             boolExpr,
             nullExpr,
             selfExpr,
+            matchExpr,
+            gameTypeCtorExpr,
             vecLiteralExpr,
             Between(Terms.Char('('), expr, Terms.Char(')').ElseError("Expected ')'")),
             idExpr
@@ -544,7 +617,20 @@ public static class PspParser
             (Terms.Text("||"), static (context, a, b) => new BinaryExpr(a, BinaryOp.LogicalOr, b) { Span = a.Span })
         );
 
-        expr.Parser = logicOrExpr;
+        var ternaryExpr = Deferred<Expr>();
+        ternaryExpr.Parser = logicOrExpr
+            .And(
+                Terms.Char('?')
+                    .SkipAnd(expr)
+                    .AndSkip(Terms.Char(':').ElseError("Expected ':' in ternary conditional expression"))
+                    .And(ternaryExpr)
+                    .ThenElse<(Expr? Then, Expr? Else)>(static (context, x) => (x.Item1, x.Item2), default)
+            )
+            .Then<Expr>(static (context, x) => x.Item2.Then is not null && x.Item2.Else is not null
+                ? new TernaryExpr(x.Item1, x.Item2.Then, x.Item2.Else) { Span = x.Item1.Span }
+                : x.Item1);
+
+        expr.Parser = ternaryExpr;
 
         // ====================================================================
         // Shared Helpers (NamedArgs, Fields, Params, Blocks)
@@ -573,13 +659,21 @@ public static class PspParser
             .SkipAnd(expr)
             .ThenElse<Expr?>(static (context, e) => e, null);
 
-        // pos: vec2 = { 0.0, 0.0 }
-        var fieldDecl = WithSpan(rawIdentifier
+        // pos: vec2 = { 0.0, 0.0 }  OR  frame = 0  OR  pos = vec2(240.0, 136.0)
+        var typedFieldDecl = rawIdentifier
             .AndSkip(Terms.Char(':'))
             .And(typeRef)
             .And(optionalInitializer)
             .AndSkip(ZeroOrOne(Terms.Char(',')))
-            .Then(static (context, x) => new FieldDecl(x.Item1, x.Item2, x.Item3)));
+            .Then(static (context, x) => new FieldDecl(x.Item1, x.Item2, x.Item3));
+
+        var inferredFieldDecl = rawIdentifier
+            .AndSkip(Terms.Char('='))
+            .And(expr)
+            .AndSkip(ZeroOrOne(Terms.Char(',')))
+            .Then(static (context, x) => new FieldDecl(x.Item1, null, x.Item2));
+
+        var fieldDecl = WithSpan(OneOf(typedFieldDecl, inferredFieldDecl));
 
         // dt: f32
         var paramDecl = WithSpan(identifier
@@ -644,25 +738,8 @@ public static class PspParser
             )
             .Then(static (context, x) => new IfStmt(x.Item1, x.Item2, x.Item3));
 
-        // match scrutinee { Pattern => stmt_or_block, _ => ... }
-        var wildcardPattern = Keyword("_")
-            .Then<MatchPattern>(static (context, _) => new WildcardPattern());
-
-        var enumVariantPattern = identifier
-            .AndSkip(Terms.Char('.'))
-            .And(identifier.ElseError("Expected enum variant name after '.'"))
-            .Then<MatchPattern>(static (context, x) => new EnumVariantPattern(x.Item1, x.Item2));
-
-        var signedIntPattern = Terms.Char('-').ThenElse(static (_, _) => true, false)
-            .And(intLiteral)
-            .Then<MatchPattern>(static (context, x) => new IntLiteralPattern(x.Item1 ? -x.Item2 : x.Item2));
-
-        var constPattern = identifier
-            .Then<MatchPattern>(static (context, name) => new ConstPattern(name));
-
-        var matchPattern = WithSpan(OneOf(wildcardPattern, enumVariantPattern, signedIntPattern, constPattern));
-
-        var matchArm = WithSpan(matchPattern
+        // match scrutinee { Pattern | Pattern => stmt_or_block, _ => ... }
+        var matchArm = WithSpan(matchPatternList
             .AndSkip(Terms.Text("=>").ElseError("Expected '=>' after match pattern"))
             .And(OneOf(blockStmt.Then<Stmt>(static (context, b) => b), stmt))
             .AndSkip(ZeroOrOne(Terms.Char(',')))
@@ -677,15 +754,19 @@ public static class PspParser
             ))
             .Then<Stmt>(static (context, x) => new MatchStmt(x.Item1, x.Item2));
 
-        // for i in start..end { ... }
+        // for i in start..end { ... } or for i in start..=end { ... }
+        var rangeOp = Terms.Text("..=").Then(static (context, _) => true)
+            .Or(Terms.Text("..").Then(static (context, _) => false))
+            .ElseError("Expected '..' or '..=' in range 'for' loop");
+
         var forRangeStmt = Keyword("for")
             .SkipAnd(identifier)
             .AndSkip(Keyword("in"))
             .And(expr)
-            .AndSkip(Terms.Text("..").ElseError("Expected '..' in range 'for' loop"))
+            .And(rangeOp)
             .And(expr)
             .And(blockStmt)
-            .Then<Stmt>(static (context, x) => new ForRangeStmt(x.Item1, x.Item2, x.Item3, x.Item4));
+            .Then<Stmt>(static (context, x) => new ForRangeStmt(x.Item1, x.Item2, x.Item4, x.Item5, IsInclusive: x.Item3));
 
         // for cond { ... }
         var forCondStmt = Keyword("for")
@@ -701,9 +782,12 @@ public static class PspParser
             .And(blockStmt)
             .Then<Stmt>(static (context, x) => new ForEachStmt(x.Item1, x.Item2, x.Item3));
 
-        // break
+        // break / continue
         var breakStmt = Keyword("break")
             .Then<Stmt>(static (context, _) => new BreakStmt());
+
+        var continueStmt = Keyword("continue")
+            .Then<Stmt>(static (context, _) => new ContinueStmt());
 
         // return expr?
         var returnStmt = Keyword("return")
@@ -786,6 +870,7 @@ public static class PspParser
             forCondStmt,
             forEachStmt,
             breakStmt,
+            continueStmt,
             returnStmt,
             sendStmt,
             spawnStandalone,

@@ -10,25 +10,23 @@ state Match {
         }
 
         match_active = true
-        PlayerPaddle.pos = { 20.0, 108.0 }
-        CpuPaddle.pos = { 450.0, 108.0 }
+        PlayerPaddle.pos = vec2(20.0, 108.0)
+        CpuPaddle.pos = vec2(450.0, 108.0)
 
-        if cpu_difficulty == 0 {
-            CpuPaddle.speed = 120.0
-        } else if cpu_difficulty == 1 {
-            CpuPaddle.speed = 160.0
-        } else {
-            CpuPaddle.speed = 215.0
+        CpuPaddle.speed = match cpu_difficulty {
+            DIFF_EASY => 120.0,
+            DIFF_NORMAL => 160.0,
+            _ => 215.0
         }
 
-        spawn Ball { pos: { 236.0, 132.0 }, vel: { -180.0, 95.0 } }
+        spawn Ball { pos: vec2(236.0, 132.0), vel: vec2(-180.0, 95.0) }
     }
 
     update(dt: f32) {
         each b in Ball {
-            var ball_rect: rect = { b.pos.x, b.pos.y, b.size, b.size }
-            var player_rect: rect = { PlayerPaddle.pos.x, PlayerPaddle.pos.y, PlayerPaddle.size.x, PlayerPaddle.size.y }
-            var cpu_rect: rect = { CpuPaddle.pos.x, CpuPaddle.pos.y, CpuPaddle.size.x, CpuPaddle.size.y }
+            var ball_rect = rect(b.pos.x, b.pos.y, b.size, b.size)
+            var player_rect = rect(PlayerPaddle.pos.x, PlayerPaddle.pos.y, PlayerPaddle.size.x, PlayerPaddle.size.y)
+            var cpu_rect = rect(CpuPaddle.pos.x, CpuPaddle.pos.y, CpuPaddle.size.x, CpuPaddle.size.y)
 
             // Guide CPU paddle toward the active ball center
             CpuPaddle.track_y = ball_rect.center.y
@@ -66,13 +64,13 @@ state Match {
             }
         }
 
-        if player_score >= 5 {
+        if player_score >= WIN_SCORE {
             last_winner_is_player = true
             player_wins += 1
             save_game()
             goto GameOver
         }
-        if cpu_score >= 5 {
+        if cpu_score >= WIN_SCORE {
             last_winner_is_player = false
             goto GameOver
         }

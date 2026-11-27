@@ -161,9 +161,9 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 
 | Example | Entry Point | Showcased Features |
 | :--- | :--- | :--- |
-| **PSP Pong** | [examples/pong/main.psps](examples/pong/main.psps) | Multi-file `import` + `import input`, compile-time baked WAV SFX (`sfx_chip`, `sfx_click`, `sfx_hit`, `sfx_score`), built-in `rect.overlaps` / `rect.center`, range `for i in 0..12`, `MainMenu` with message-driven `Button[4]`, difficulty selector, `Ball[4]` pool, `PaddleBounce` messages, bitmap font HUD, `save_game` / `load_game` |
-| **Sprite Demo** | [examples/sprite/main.psps](examples/sprite/main.psps) | Compile-time baked PNGs (`Free_Chicken_House.png`, `Egg_item.png`), `import input` + `dpad_vector()`, `sprite(...)`, tint cycling via `CycleTint` message, bobbing pooled `Egg[8]`, `temp var` normalized movement |
-| **Animation Demo** | [examples/anim/main.psps](examples/anim/main.psps) | Baked spritesheets (`Basic Charakter Spritesheet.png`, `Free Chicken Sprites.png`), `import input` + `dpad_vector()`, 4-directional `draw_subsprite` animation with `timer` frame clocks, pooled `Chicken[6]` AI + `Startle` message, 2D camera tracking |
+| **PSP Pong** | [examples/pong/main.psps](examples/pong/main.psps) | Multi-file `import` + `import input`, compile-time `const` pool capacities & `match` expressions, ternary `?:`, field type inference & `vec2`/`rect` constructors, baked WAV SFX (`sfx_chip`, `sfx_click`, `sfx_hit`, `sfx_score`), `rect.overlaps` / `rect.center`, range `for i in 0..12`, `MainMenu` with message-driven `Button[MAX_BUTTONS]`, `Ball[MAX_BALLS]` pool, `PaddleBounce` messages, bitmap font HUD, `save_game` / `load_game` |
+| **Sprite Demo** | [examples/sprite/main.psps](examples/sprite/main.psps) | Compile-time baked PNGs (`Free_Chicken_House.png`, `Egg_item.png`), `import input` + `dpad_vector()`, field type inference & `vec2(...)`, `match` expression tint cycling via `CycleTint` message, bobbing pooled `Egg[8]`, `temp var` normalized movement |
+| **Animation Demo** | [examples/anim/main.psps](examples/anim/main.psps) | Baked spritesheets (`Basic Charakter Spritesheet.png`, `Free Chicken Sprites.png`), `import input` + `dpad_vector()`, field type inference, ternary `?:` & `rect(...)`, 4-directional `draw_subsprite` animation with `timer` frame clocks, pooled `Chicken[6]` AI + `Startle` message, 2D camera tracking |
 
 ---
 
@@ -204,10 +204,10 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 
 ### v0.3 (In Progress)
 * [x] Compile-Time Constants (`const NAME[: type] = expr`, usable in expressions, array/pool sizes, and `match` patterns)
-* [ ] Ternary Conditional Expression (`cond ? a : b`)
-* [ ] Loop Ergonomics (`continue` statement & inclusive ranges `0..=10`)
-* [ ] Field Type Inference & Typed Game Constructors (`vec2(x, y)`, `vec3(x, y, z)`, `rect(x, y, w, h)`)
-* [ ] Enhanced `match` (multi-pattern `|` arms, `const` patterns, and `match` expressions)
+* [x] Ternary Conditional Expression (`cond ? a : b`)
+* [x] Loop Ergonomics (`continue` statement & inclusive ranges `0..=10`)
+* [x] Field Type Inference & Typed Game Constructors (`vec2(x, y)`, `vec3(x, y, z)`, `rect(x, y, w, h)`)
+* [x] Enhanced `match` (multi-pattern `|` arms, `const` patterns, and `match` expressions)
 
 ---
 

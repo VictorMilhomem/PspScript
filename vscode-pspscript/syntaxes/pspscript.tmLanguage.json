@@ -189,7 +189,7 @@
         },
         {
           "name": "keyword.control.flow.pspscript",
-          "match": "\\b(if|else|match|for|each|in|break|return|goto)\\b"
+          "match": "\\b(if|else|match|for|each|in|break|continue|return|goto)\\b"
         },
         {
           "name": "constant.language.wildcard.pspscript",
@@ -269,7 +269,11 @@
         },
         {
           "name": "keyword.operator.range.pspscript",
-          "match": "\\.\\."
+          "match": "\\.\\.=?"
+        },
+        {
+          "name": "keyword.operator.ternary.pspscript",
+          "match": "\\?"
         },
         {
           "name": "keyword.operator.assignment.compound.pspscript",

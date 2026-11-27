@@ -528,10 +528,35 @@ public sealed class SemanticAnalyzer
                 continue;
             }
 
-            var resolvedType = ResolveTypeRef(field.Type);
-            if (resolvedType == ResolvedType.Void)
+            ResolvedType resolvedType;
+            if (field.Type is not null)
             {
-                ReportError($"Field '{field.Name}' in {ownerDescription} cannot have type 'void'.", field.Span);
+                resolvedType = ResolveTypeRef(field.Type);
+                if (resolvedType == ResolvedType.Void)
+                {
+                    ReportError($"Field '{field.Name}' in {ownerDescription} cannot have type 'void'.", field.Span);
+                    resolvedType = ResolvedType.Error;
+                }
+            }
+            else if (field.DefaultValue is not null)
+            {
+                var inferred = ResolveExpr(field.DefaultValue, new LexicalScope(null), expectedType: null);
+                if (inferred is NullType || inferred == ResolvedType.Void)
+                {
+                    ReportError(
+                        $"Cannot infer type of field '{field.Name}' in {ownerDescription} from '{inferred.DisplayName}'. Specify an explicit type.",
+                        field.Span
+                    );
+                    resolvedType = ResolvedType.Error;
+                }
+                else
+                {
+                    resolvedType = inferred;
+                }
+            }
+            else
+            {
+                ReportError($"Field '{field.Name}' in {ownerDescription} must specify a type or a default value.", field.Span);
                 resolvedType = ResolvedType.Error;
             }
 
@@ -1179,6 +1204,10 @@ public sealed class SemanticAnalyzer
                 ValidateBreakStmt(breakStmt, scope);
                 break;
 
+            case ContinueStmt continueStmt:
+                ValidateContinueStmt(continueStmt, scope);
+                break;
+
             case ReturnStmt returnStmt:
                 ValidateReturnStmt(returnStmt, scope);
                 break;
@@ -1458,105 +1487,118 @@ public sealed class SemanticAnalyzer
             return;
         }
 
-        if (scrutineeType.IsError)
+        if (!scrutineeType.IsError)
         {
-            foreach (var arm in matchStmt.Arms)
-            {
-                ValidateMatchArmBody(arm.Body, scope);
-            }
-            return;
+            var armPatterns = matchStmt.Arms
+                .Select(static a => (a.Patterns, a.Span))
+                .ToList();
+            ValidateMatchArmsPatterns(scrutineeType, armPatterns, scope, matchStmt.Span, matchStmt.Scrutinee.Span);
         }
 
+        foreach (var arm in matchStmt.Arms)
+        {
+            ValidateMatchArmBody(arm.Body, scope);
+        }
+    }
+
+    private void ValidateMatchArmsPatterns(
+        ResolvedType scrutineeType,
+        IReadOnlyList<(IReadOnlyList<MatchPattern> Patterns, SourceSpan ArmSpan)> arms,
+        LexicalScope scope,
+        SourceSpan matchSpan,
+        SourceSpan scrutineeSpan)
+    {
         if (scrutineeType is EnumType enumType && _symbols.Enums.TryGetValue(enumType.Name, out var enumSym))
         {
             var coveredVariants = new HashSet<string>(StringComparer.Ordinal);
             bool hasWildcard = false;
 
-            foreach (var arm in matchStmt.Arms)
+            foreach (var (patterns, armSpan) in arms)
             {
                 if (hasWildcard)
                 {
-                    ReportError("Unreachable 'match' arm after wildcard '_'.", arm.Span);
+                    ReportError("Unreachable 'match' arm after wildcard '_'.", armSpan);
                 }
 
-                switch (arm.Pattern)
+                foreach (var pattern in patterns)
                 {
-                    case WildcardPattern:
-                        if (hasWildcard)
-                        {
-                            ReportError("Duplicate wildcard '_' arm in 'match' statement.", arm.Span);
-                        }
-                        hasWildcard = true;
-                        break;
+                    switch (pattern)
+                    {
+                        case WildcardPattern:
+                            if (hasWildcard)
+                            {
+                                ReportError("Duplicate wildcard '_' arm in 'match' statement.", armSpan);
+                            }
+                            hasWildcard = true;
+                            break;
 
-                    case EnumVariantPattern variantPat:
-                        if (!string.Equals(variantPat.EnumName, enumSym.Name, StringComparison.Ordinal))
-                        {
-                            ReportError(
-                                $"Match arm pattern '{variantPat.EnumName}.{variantPat.VariantName}' does not match scrutinee enum type '{enumSym.Name}'.",
-                                arm.Span
-                            );
-                        }
-                        else if (!enumSym.Variants.Contains(variantPat.VariantName))
-                        {
-                            ReportError(
-                                $"Enum '{enumSym.Name}' does not contain a variant named '{variantPat.VariantName}'.",
-                                arm.Span
-                            );
-                        }
-                        else if (!coveredVariants.Add(variantPat.VariantName))
-                        {
-                            ReportError(
-                                $"Duplicate match arm for '{enumSym.Name}.{variantPat.VariantName}'.",
-                                arm.Span
-                            );
-                        }
-                        break;
-
-                    case IntLiteralPattern intPat:
-                        ReportError(
-                            $"Cannot match integer literal '{intPat.Value}' against enum type '{enumSym.Name}'.",
-                            arm.Span
-                        );
-                        break;
-
-                    case ConstPattern constPat:
-                        if (!TryLookupConstValue(constPat.Name, scope, out var enumConstVal, out _))
-                        {
-                            ReportError($"Undeclared compile-time constant '{constPat.Name}' in 'match' pattern.", constPat.Span);
-                        }
-                        else if (enumConstVal is EnumConstValue ecv)
-                        {
-                            if (!string.Equals(ecv.EnumName, enumSym.Name, StringComparison.Ordinal))
+                        case EnumVariantPattern variantPat:
+                            if (!string.Equals(variantPat.EnumName, enumSym.Name, StringComparison.Ordinal))
                             {
                                 ReportError(
-                                    $"Constant '{constPat.Name}' ({ecv.EnumName}.{ecv.VariantName}) does not match scrutinee enum type '{enumSym.Name}'.",
-                                    constPat.Span
+                                    $"Match arm pattern '{variantPat.EnumName}.{variantPat.VariantName}' does not match scrutinee enum type '{enumSym.Name}'.",
+                                    variantPat.Span
                                 );
                             }
-                            else if (!coveredVariants.Add(ecv.VariantName))
+                            else if (!enumSym.Variants.Contains(variantPat.VariantName))
                             {
                                 ReportError(
-                                    $"Duplicate match arm for '{enumSym.Name}.{ecv.VariantName}' (via constant '{constPat.Name}').",
-                                    arm.Span
+                                    $"Enum '{enumSym.Name}' does not contain a variant named '{variantPat.VariantName}'.",
+                                    variantPat.Span
                                 );
+                            }
+                            else if (!coveredVariants.Add(variantPat.VariantName))
+                            {
+                                ReportError(
+                                    $"Duplicate match arm for '{enumSym.Name}.{variantPat.VariantName}'.",
+                                    variantPat.Span
+                                );
+                            }
+                            break;
+
+                        case IntLiteralPattern intPat:
+                            ReportError(
+                                $"Cannot match integer literal '{intPat.Value}' against enum type '{enumSym.Name}'.",
+                                intPat.Span
+                            );
+                            break;
+
+                        case ConstPattern constPat:
+                            if (!TryLookupConstValue(constPat.Name, scope, out var enumConstVal, out _))
+                            {
+                                ReportError($"Undeclared compile-time constant '{constPat.Name}' in 'match' pattern.", constPat.Span);
+                            }
+                            else if (enumConstVal is EnumConstValue ecv)
+                            {
+                                if (!string.Equals(ecv.EnumName, enumSym.Name, StringComparison.Ordinal))
+                                {
+                                    ReportError(
+                                        $"Constant '{constPat.Name}' ({ecv.EnumName}.{ecv.VariantName}) does not match scrutinee enum type '{enumSym.Name}'.",
+                                        constPat.Span
+                                    );
+                                }
+                                else if (!coveredVariants.Add(ecv.VariantName))
+                                {
+                                    ReportError(
+                                        $"Duplicate match arm for '{enumSym.Name}.{ecv.VariantName}' (via constant '{constPat.Name}').",
+                                        constPat.Span
+                                    );
+                                }
+                                else
+                                {
+                                    _model.RecordConstPattern(constPat, ecv);
+                                }
                             }
                             else
                             {
-                                _model.RecordConstPattern(constPat, ecv);
+                                ReportError(
+                                    $"Constant '{constPat.Name}' cannot be matched against enum type '{enumSym.Name}'.",
+                                    constPat.Span
+                                );
                             }
-                        }
-                        else
-                        {
-                            ReportError(
-                                $"Constant '{constPat.Name}' cannot be matched against enum type '{enumSym.Name}'.",
-                                constPat.Span
-                            );
-                        }
-                        break;
+                            break;
+                    }
                 }
-
-                ValidateMatchArmBody(arm.Body, scope);
             }
 
             if (!hasWildcard)
@@ -1567,7 +1609,7 @@ public sealed class SemanticAnalyzer
                     string missingList = string.Join(", ", missing.Select(static v => $"'{v}'"));
                     ReportError(
                         $"Non-exhaustive match on '{enumSym.Name}': missing cases {missingList}.",
-                        matchStmt.Span
+                        matchSpan
                     );
                 }
             }
@@ -1577,78 +1619,79 @@ public sealed class SemanticAnalyzer
             var coveredInts = new HashSet<int>();
             bool hasWildcard = false;
 
-            foreach (var arm in matchStmt.Arms)
+            foreach (var (patterns, armSpan) in arms)
             {
                 if (hasWildcard)
                 {
-                    ReportError("Unreachable 'match' arm after wildcard '_'.", arm.Span);
+                    ReportError("Unreachable 'match' arm after wildcard '_'.", armSpan);
                 }
 
-                switch (arm.Pattern)
+                foreach (var pattern in patterns)
                 {
-                    case WildcardPattern:
-                        if (hasWildcard)
-                        {
-                            ReportError("Duplicate wildcard '_' arm in 'match' statement.", arm.Span);
-                        }
-                        hasWildcard = true;
-                        break;
+                    switch (pattern)
+                    {
+                        case WildcardPattern:
+                            if (hasWildcard)
+                            {
+                                ReportError("Duplicate wildcard '_' arm in 'match' statement.", armSpan);
+                            }
+                            hasWildcard = true;
+                            break;
 
-                    case IntLiteralPattern intPat:
-                        if (!coveredInts.Add(intPat.Value))
-                        {
-                            ReportError(
-                                $"Duplicate match arm for integer literal '{intPat.Value}'.",
-                                arm.Span
-                            );
-                        }
-                        break;
-
-                    case EnumVariantPattern variantPat:
-                        ReportError(
-                            $"Cannot match enum variant '{variantPat.EnumName}.{variantPat.VariantName}' against integer type '{scrutineeType}'.",
-                            arm.Span
-                        );
-                        break;
-
-                    case ConstPattern constPat:
-                        if (!TryLookupConstValue(constPat.Name, scope, out var intConstVal, out _))
-                        {
-                            ReportError($"Undeclared compile-time constant '{constPat.Name}' in 'match' pattern.", constPat.Span);
-                        }
-                        else if (intConstVal is IntConstValue icv)
-                        {
-                            int val = (int)icv.Value;
-                            if (!coveredInts.Add(val))
+                        case IntLiteralPattern intPat:
+                            if (!coveredInts.Add(intPat.Value))
                             {
                                 ReportError(
-                                    $"Duplicate match arm for integer value '{val}' (via constant '{constPat.Name}').",
-                                    arm.Span
+                                    $"Duplicate match arm for integer literal '{intPat.Value}'.",
+                                    intPat.Span
                                 );
+                            }
+                            break;
+
+                        case EnumVariantPattern variantPat:
+                            ReportError(
+                                $"Cannot match enum variant '{variantPat.EnumName}.{variantPat.VariantName}' against integer type '{scrutineeType}'.",
+                                variantPat.Span
+                            );
+                            break;
+
+                        case ConstPattern constPat:
+                            if (!TryLookupConstValue(constPat.Name, scope, out var intConstVal, out _))
+                            {
+                                ReportError($"Undeclared compile-time constant '{constPat.Name}' in 'match' pattern.", constPat.Span);
+                            }
+                            else if (intConstVal is IntConstValue icv)
+                            {
+                                int val = (int)icv.Value;
+                                if (!coveredInts.Add(val))
+                                {
+                                    ReportError(
+                                        $"Duplicate match arm for integer value '{val}' (via constant '{constPat.Name}').",
+                                        constPat.Span
+                                    );
+                                }
+                                else
+                                {
+                                    _model.RecordConstPattern(constPat, icv);
+                                }
                             }
                             else
                             {
-                                _model.RecordConstPattern(constPat, icv);
+                                ReportError(
+                                    $"Constant '{constPat.Name}' must be an integer constant to match against '{scrutineeType}'.",
+                                    constPat.Span
+                                );
                             }
-                        }
-                        else
-                        {
-                            ReportError(
-                                $"Constant '{constPat.Name}' must be an integer constant to match against '{scrutineeType}'.",
-                                constPat.Span
-                            );
-                        }
-                        break;
+                            break;
+                    }
                 }
-
-                ValidateMatchArmBody(arm.Body, scope);
             }
 
             if (!hasWildcard)
             {
                 ReportError(
                     $"Non-exhaustive match on integer type '{scrutineeType}': a wildcard '_' arm is required.",
-                    matchStmt.Span
+                    matchSpan
                 );
             }
         }
@@ -1656,13 +1699,8 @@ public sealed class SemanticAnalyzer
         {
             ReportError(
                 $"'match' scrutinee must be an enum or integer type, got '{scrutineeType}'.",
-                matchStmt.Scrutinee.Span
+                scrutineeSpan
             );
-
-            foreach (var arm in matchStmt.Arms)
-            {
-                ValidateMatchArmBody(arm.Body, scope);
-            }
         }
     }
 
@@ -1791,6 +1829,16 @@ public sealed class SemanticAnalyzer
         }
 
         _model.RecordType(breakStmt, ResolvedType.Void);
+    }
+
+    private void ValidateContinueStmt(ContinueStmt continueStmt, LexicalScope scope)
+    {
+        if (!scope.IsInsideLoop)
+        {
+            ReportError("'continue' statement can only be used inside a 'for' or 'each' loop.", continueStmt.Span);
+        }
+
+        _model.RecordType(continueStmt, ResolvedType.Void);
     }
 
     private void ValidateReturnStmt(ReturnStmt returnStmt, LexicalScope scope)
@@ -2035,6 +2083,8 @@ public sealed class SemanticAnalyzer
             IdentifierExpr idExpr => ResolveIdentifierExpr(idExpr, scope),
             UnaryExpr unaryExpr => ResolveUnaryExpr(unaryExpr, scope),
             BinaryExpr binaryExpr => ResolveBinaryExpr(binaryExpr, scope),
+            TernaryExpr ternaryExpr => ResolveTernaryExpr(ternaryExpr, scope, expectedType),
+            MatchExpr matchExpr => ResolveMatchExpr(matchExpr, scope, expectedType),
             FieldAccessExpr fieldExpr => ResolveFieldAccessExpr(fieldExpr, scope),
             IndexAccessExpr indexExpr => ResolveIndexAccessExpr(indexExpr, scope),
             CallExpr callExpr => ResolveCallExpr(callExpr, scope),
@@ -2042,6 +2092,94 @@ public sealed class SemanticAnalyzer
         };
 
         return _model.RecordType(expr, resolved);
+    }
+
+    private ResolvedType ResolveTernaryExpr(
+        TernaryExpr ternary,
+        LexicalScope scope,
+        ResolvedType? expectedType)
+    {
+        var condType = ResolveExpr(ternary.Condition, scope, expectedType: ResolvedType.Bool);
+        if (!condType.IsError && condType != ResolvedType.Bool)
+        {
+            ReportError($"Ternary condition must evaluate to 'bool', got '{condType}'.", ternary.Condition.Span);
+        }
+
+        var trueType = ResolveExpr(ternary.WhenTrue, scope, expectedType: expectedType);
+        var falseType = ResolveExpr(ternary.WhenFalse, scope, expectedType: expectedType ?? (trueType.IsError ? null : trueType));
+
+        if (trueType.IsError || falseType.IsError)
+            return ResolvedType.Error;
+
+        if (trueType == falseType)
+            return trueType;
+
+        if (ResolvedType.IsAssignableTo(trueType, falseType))
+            return falseType;
+
+        if (ResolvedType.IsAssignableTo(falseType, trueType))
+            return trueType;
+
+        ReportError(
+            $"Ternary conditional branches have incompatible types: '{trueType}' and '{falseType}'.",
+            ternary.Span
+        );
+        return ResolvedType.Error;
+    }
+
+    private ResolvedType ResolveMatchExpr(
+        MatchExpr matchExpr,
+        LexicalScope scope,
+        ResolvedType? expectedType)
+    {
+        var scrutineeType = ResolveExpr(matchExpr.Scrutinee, scope, expectedType: null);
+        if (matchExpr.Arms.Count == 0)
+        {
+            ReportError("'match' expression must have at least one arm.", matchExpr.Span);
+            return ResolvedType.Error;
+        }
+
+        if (!scrutineeType.IsError)
+        {
+            var armPatterns = matchExpr.Arms
+                .Select(static a => (a.Patterns, a.Span))
+                .ToList();
+            ValidateMatchArmsPatterns(scrutineeType, armPatterns, scope, matchExpr.Span, matchExpr.Scrutinee.Span);
+        }
+
+        ResolvedType? unifiedType = null;
+        foreach (var arm in matchExpr.Arms)
+        {
+            var armType = ResolveExpr(arm.Value, scope, expectedType: expectedType ?? unifiedType);
+            if (armType.IsError)
+                continue;
+
+            if (unifiedType is null)
+            {
+                unifiedType = armType;
+            }
+            else if (unifiedType == armType)
+            {
+                continue;
+            }
+            else if (ResolvedType.IsAssignableTo(armType, unifiedType))
+            {
+                continue;
+            }
+            else if (ResolvedType.IsAssignableTo(unifiedType, armType))
+            {
+                unifiedType = armType;
+            }
+            else
+            {
+                ReportError(
+                    $"Match expression arm produces incompatible type '{armType}', expected '{unifiedType}'.",
+                    arm.Value.Span
+                );
+            }
+        }
+
+        return unifiedType ?? ResolvedType.Error;
     }
 
     private ResolvedType ResolveSelfExpr(SelfExpr selfExpr, LexicalScope scope)
@@ -3174,6 +3312,93 @@ public sealed class SemanticAnalyzer
 
             case BinaryExpr be:
                 return TryEvaluateBinaryConst(be, scope, out value, out type);
+
+            case TernaryExpr te:
+                if (!TryEvaluateConstExpr(te.Condition, scope, ResolvedType.Bool, out var cVal, out var cType) ||
+                    cVal is not BoolConstValue bcv)
+                {
+                    value = null;
+                    type = ResolvedType.Error;
+                    return false;
+                }
+                _ = cType;
+                return TryEvaluateConstExpr(bcv.Value ? te.WhenTrue : te.WhenFalse, scope, expectedType, out value, out type);
+
+            case CallExpr { Callee: IdentifierExpr { Name: "vec2" or "vec3" or "rect" } ctorId } ctorCall:
+            {
+                int expectedArgs = ctorId.Name switch { "vec2" => 2, "vec3" => 3, _ => 4 };
+                if (ctorCall.Arguments.Count != expectedArgs)
+                {
+                    value = null;
+                    type = ResolvedType.Error;
+                    return false;
+                }
+                var comps = new List<float>(expectedArgs);
+                foreach (var arg in ctorCall.Arguments)
+                {
+                    if (!TryEvaluateConstExpr(arg, scope, ResolvedType.F32, out var argVal, out _))
+                    {
+                        value = null;
+                        type = ResolvedType.Error;
+                        return false;
+                    }
+                    if (argVal is IntConstValue ic) comps.Add(ic.Value);
+                    else if (argVal is FloatConstValue fc) comps.Add(fc.Value);
+                    else
+                    {
+                        value = null;
+                        type = ResolvedType.Error;
+                        return false;
+                    }
+                }
+                ResolvedType ctorType = ctorId.Name switch
+                {
+                    "vec2" => ResolvedType.Vec2,
+                    "vec3" => ResolvedType.Vec3,
+                    _ => ResolvedType.Rect
+                };
+                value = new VecConstValue(comps);
+                type = _model.RecordType(expr, ctorType);
+                return true;
+            }
+
+            case MatchExpr me:
+            {
+                if (!TryEvaluateConstExpr(me.Scrutinee, scope, null, out var scrVal, out var scrType) || scrVal is null)
+                {
+                    value = null;
+                    type = ResolvedType.Error;
+                    return false;
+                }
+                _ = scrType;
+                foreach (var arm in me.Arms)
+                {
+                    foreach (var pat in arm.Patterns)
+                    {
+                        bool matched = pat switch
+                        {
+                            WildcardPattern => true,
+                            IntLiteralPattern il when scrVal is IntConstValue iv => iv.Value == il.Value,
+                            EnumVariantPattern ev when scrVal is EnumConstValue ecv =>
+                                string.Equals(ecv.EnumName, ev.EnumName, StringComparison.Ordinal) &&
+                                string.Equals(ecv.VariantName, ev.VariantName, StringComparison.Ordinal),
+                            ConstPattern cp when TryLookupConstValue(cp.Name, scope, out var pcv, out _) =>
+                                (pcv is IntConstValue piv && scrVal is IntConstValue siv && piv.Value == siv.Value) ||
+                                (pcv is EnumConstValue pev && scrVal is EnumConstValue sev &&
+                                 string.Equals(pev.EnumName, sev.EnumName, StringComparison.Ordinal) &&
+                                 string.Equals(pev.VariantName, sev.VariantName, StringComparison.Ordinal)),
+                            _ => false
+                        };
+                        if (matched)
+                        {
+                            return TryEvaluateConstExpr(arm.Value, scope, expectedType, out value, out type);
+                        }
+                    }
+                }
+                value = null;
+                type = ResolvedType.Error;
+                return false;
+            }
 
             default:
                 value = null;

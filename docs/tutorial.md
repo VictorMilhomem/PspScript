@@ -539,11 +539,13 @@ fn wait_until_edge(x: f32) -> f32 {
 ```
 
 - `if condition { ... } else if other { ... } else { ... }`
-- `match value { Pattern => stmt_or_block, _ => ... }` — exhaustive pattern matching over `enum` or integer types (lowers to C99 `switch`). Every variant of an `enum` must be handled unless a `_` wildcard arm is present; integer `match` statements always require `_`.
+- `condition ? expr_if_true : expr_if_false` — right-associative ternary conditional expression (also supported in compile-time `const` expressions)
+- `match value { P1 | P2 => stmt_or_block, _ => ... }` — exhaustive pattern matching over `enum` or integer types (lowers to C99 `switch`), supporting `|` multi-patterns, `const` patterns, and **expression form** (`var speed = match diff { 0 => 120.0, 1 | 2 => 180.0, _ => 240.0 }`).
+- **Field type inference & typed game constructors:** Fields in `actor`, `state`, `struct`, and `message` can omit `: Type` when given an initializer (`frame = 0`, `walking = false`, `anim_timer = 180ms`, `pos = vec2(240.0, 136.0)`). Typed constructors `vec2(x, y)`, `vec3(x, y, z)`, and `rect(x, y, w, h)` work in both runtime expressions and `const` declarations alongside `{ ... }` literals.
 - `for condition { ... }` — Go-style conditional loop (`condition` must be `bool`)
-- `for i in start..end { ... }` — exclusive integer range loop (`i` is an immutable, block-scoped `int`)
+- `for i in start..end { ... }` / `for i in start..=end { ... }` — exclusive (`..`) and inclusive (`..=`) integer range loops (`i` is an immutable, block-scoped `int`)
 - `each item in PoolName { ... }` — safe active-slot iteration over actor pools
-- `break` — exits the innermost `for` or `each` loop immediately
+- `break` / `continue` — exits or skips to the next iteration of the innermost `for` or `each` loop immediately
 - `return` or `return expr` (non-void functions must return a value on all code paths)
 - **Bitwise operators (integers only):** `&`, `|`, `^`, `<<`, `>>`, unary `~`, and compound assignments `&=`, `|=`, `^=`, `<<=`, `>>=` (follows standard C99 precedence; useful for combining PSP button bitmasks like `BTN_CROSS | BTN_START` or flag fields).
 - Functions without `-> Type` default to `void`.

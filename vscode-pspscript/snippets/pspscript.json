@@ -55,7 +55,17 @@
       "\t_ => $0",
       "}"
     ],
-    "description": "Exhaustive match statement over an enum or integer"
+    "description": "Exhaustive match statement over an enum or integer (supports | multi-patterns)"
+  },
+  "Match Expression": {
+    "prefix": "matchexpr",
+    "body": [
+      "var ${1:result} = match ${2:value} {",
+      "\t${3:0} | ${4:1} => ${5:10},",
+      "\t_ => ${6:0}",
+      "}"
+    ],
+    "description": "Exhaustive match expression returning a typed value"
   },
   "Range For Loop": {
     "prefix": "for",
@@ -65,6 +75,15 @@
       "}"
     ],
     "description": "Exclusive integer range for loop"
+  },
+  "Inclusive Range For Loop": {
+    "prefix": "forinc",
+    "body": [
+      "for ${1:i} in ${2:0}..=${3:10} {",
+      "\t$0",
+      "}"
+    ],
+    "description": "Inclusive integer range for loop (0..=10)"
   },
   "Conditional For Loop": {
     "prefix": "forcond",

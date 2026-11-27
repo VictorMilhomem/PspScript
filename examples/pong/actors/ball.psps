@@ -1,11 +1,11 @@
 import "../shared/constants"
 
-actor Ball[4] {
-    pos: vec2 = { 236.0, 132.0 }
-    vel: vec2 = { -180.0, 90.0 }
-    size: f32 = 8.0
-    serve_delay: timer = 0.75s
-    tint: color = #FFF275
+actor Ball[MAX_BALLS] {
+    pos = vec2(236.0, 132.0)
+    vel = vec2(-180.0, 90.0)
+    size = 8.0
+    serve_delay = 0.75s
+    tint = #FFF275
 
     on PaddleBounce(msg) {
         var speed_x: f32 = clamp(abs(vel.x) * 1.06, 180.0, 340.0)

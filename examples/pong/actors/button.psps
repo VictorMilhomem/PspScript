@@ -1,11 +1,11 @@
 import "../shared/constants"
 
-actor Button[4] {
+actor Button[MAX_BUTTONS] {
     pos: vec2
     width: int
     height: int
     action_id: int
-    selected: bool = false
+    selected = false
 
     on ButtonFocus(msg) {
         selected = (action_id == msg.focused_id)
@@ -16,48 +16,43 @@ actor Button[4] {
             return
         }
 
-        if action_id == 0 {
-            goto Match
-        } else if action_id == 1 {
-            cpu_difficulty += 1
-            if cpu_difficulty > 2 {
-                cpu_difficulty = 0
-            }
-        } else if action_id == 2 {
-            player_wins = 0
-            save_game()
+        match action_id {
+            ACT_PLAY => goto Match,
+            ACT_DIFFICULTY => {
+                cpu_difficulty = cpu_difficulty >= DIFF_HARD ? DIFF_EASY : cpu_difficulty + 1
+            },
+            ACT_RESET => {
+                player_wins = 0
+                save_game()
+            },
+            _ => {}
         }
     }
 
     draw() {
-        var border_color: color = #263859
-        var fill_color: color = #0D1529
-        var text_color: color = #8899AA
-
-        if selected {
-            border_color = #00E5FF
-            fill_color = #142442
-            text_color = #FFFFFF
-        }
+        var border_color = selected ? #00E5FF : #263859
+        var fill_color   = selected ? #142442 : #0D1529
+        var text_color   = selected ? #FFFFFF : #8899AA
 
         // Outer border and inner button panel
-        draw_rect({ pos.x, pos.y, width, height }, border_color)
-        draw_rect({ pos.x + 2.0, pos.y + 2.0, width - 4, height - 4 }, fill_color)
+        draw_rect(rect(pos.x, pos.y, width, height), border_color)
+        draw_rect(rect(pos.x + 2.0, pos.y + 2.0, width - 4, height - 4), fill_color)
 
-        var text_y: f32 = pos.y + (height * 0.5) - 4.0
+        var text_y = pos.y + (height * 0.5) - 4.0
 
-        if action_id == 0 {
-            draw_text("PLAY MATCH", { pos.x + 60.0, text_y }, text_color, 1)
-        } else if action_id == 1 {
-            if cpu_difficulty == 0 {
-                draw_text("CPU: EASY", { pos.x + 64.0, text_y }, text_color, 1)
-            } else if cpu_difficulty == 1 {
-                draw_text("CPU: NORMAL", { pos.x + 56.0, text_y }, text_color, 1)
-            } else {
-                draw_text("CPU: HARD", { pos.x + 64.0, text_y }, text_color, 1)
-            }
-        } else if action_id == 2 {
-            draw_text("RESET WINS", { pos.x + 60.0, text_y }, text_color, 1)
+        match action_id {
+            ACT_PLAY => draw_text("PLAY MATCH", vec2(pos.x + 60.0, text_y), text_color, 1),
+            ACT_DIFFICULTY => {
+                var label = match cpu_difficulty {
+                    DIFF_EASY => "CPU: EASY",
+                    DIFF_NORMAL => "CPU: NORMAL",
+                    _ => "CPU: HARD"
+                }
+                var offset_x = cpu_difficulty == DIFF_NORMAL ? 56.0 : 64.0
+                draw_text(label, vec2(pos.x + offset_x, text_y), text_color, 1)
+            },
+            ACT_RESET => draw_text("RESET WINS", vec2(pos.x + 60.0, text_y), text_color, 1),
+            _ => {}
         }
     }
 }

@@ -20,11 +20,22 @@ message ButtonPress {
     confirmed: bool
 }
 
+// Compile-time game constants (zero RAM cost; usable in pools & match patterns)
+const MAX_BALLS       = 4
+const MAX_BUTTONS     = 4
+const WIN_SCORE       = 5
+const DIFF_EASY       = 0
+const DIFF_NORMAL     = 1
+const DIFF_HARD       = 2
+const ACT_PLAY        = 0
+const ACT_DIFFICULTY  = 1
+const ACT_RESET       = 2
+
 // Persistent globals (saved via save_game() / load_game())
 global var player_wins: int = 0
 global var last_winner_is_player: bool = true
 global var save_loaded: bool = false
-global var cpu_difficulty: int = 1 // 0 = EASY, 1 = NORMAL, 2 = HARD
+global var cpu_difficulty: int = DIFF_NORMAL
 
 // Level-scoped match state (reset automatically on 'goto')
 level var player_score: int = 0
