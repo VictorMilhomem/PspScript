@@ -3,6 +3,7 @@ Program        ::= TopDecl* EOF
 TopDecl        ::= ImportDecl
                  | GameConfig
                  | AssetDecl
+                 | ConstDecl
                  | MessageDecl
                  | StructDecl
                  | EnumDecl
@@ -24,6 +25,10 @@ ConfigField    ::= IDENT ":" (INT | SIZE_LITERAL | STRING | BOOL | IDENT) ","?
 AssetDecl      ::= "asset" IDENT "=" IDENT "(" STRING ("," ArgList)? ")"
 // E.g.: asset ship = texture("ship.png", format: RGBA4444)
 
+// Compile-time constants (zero RAM; usable in expressions, [N]T, actor pools, and match patterns)
+ConstDecl      ::= "const" IDENT (":" Type)? "=" ConstExpr
+// E.g.: const MAX_ENEMIES = 32, const GRAVITY: f32 = 420.0
+
 // Messages (compile to a global Tagged Union)
 MessageDecl    ::= "message" IDENT "{" FieldList? "}"
 
@@ -34,7 +39,7 @@ StructDecl     ::= "struct" IDENT "{" FieldList? "}"
 EnumDecl       ::= "enum" IDENT "{" (IDENT ("," IDENT)* ","?)? "}"
 
 // Actors with static capacity defined on the type (pool) or singleton (no brackets)
-ActorDecl      ::= "actor" IDENT ("[" INT "]")? "{" ActorMember* "}"
+ActorDecl      ::= "actor" IDENT ("[" ConstExpr "]")? "{" ActorMember* "}"
 ActorMember    ::= FieldDecl
                  | LifecycleHook
                  | MessageHandler
@@ -57,18 +62,20 @@ Type           ::= PrimitiveType
 PrimitiveType  ::= "int" | "u8" | "u16" | "u32" | "f32" | "bool" | "void"
 GameType       ::= "vec2" | "vec3" | "rect" | "color" | "timer"
 ActorRefType   ::= "ref" "<" IDENT ">" // 32-bit generational handle
-ArrayType      ::= "[" INT "]" Type   // Fixed-size arrays only (no dynamic heap)
+ArrayType      ::= "[" ConstExpr "]" Type   // Fixed-size arrays only (no dynamic heap)
 
 GlobalVarDecl  ::= ("level" | "global")? "var" IDENT (":" Type)? ("=" Expr)?
 FieldDecl      ::= IDENT ":" Type ("=" Expr)?
 FieldList      ::= FieldDecl (("," | NEWLINE) FieldDecl)*
 
 LocalVarDecl   ::= "temp"? "var" IDENT (":" Type)? ("=" Expr)?
-// "temp var" allocates on FrameArena; normal "var" resides on the C stack
+LocalConstDecl ::= "const" IDENT (":" Type)? "=" ConstExpr
+// "temp var" allocates on FrameArena; normal "var" resides on the C stack; "const" is folded at compile time
 
 Block          ::= "{" Stmt* "}"
 
 Stmt           ::= LocalVarDecl
+                 | LocalConstDecl
                  | AssignStmt
                  | IfStmt
                  | MatchStmt
@@ -103,7 +110,7 @@ ForEachStmt    ::= "each" IDENT "in" IDENT Block
 IfStmt         ::= "if" Expr Block ("else" (IfStmt | Block))?
 MatchStmt      ::= "match" Expr "{" MatchArm* "}"
 MatchArm       ::= MatchPattern "=>" (Block | Stmt) ","?
-MatchPattern   ::= "_" | IDENT "." IDENT | "-"? INT
+MatchPattern   ::= "_" | IDENT "." IDENT | "-"? INT | IDENT
 ForStmt        ::= "for" Expr Block
 ForRangeStmt   ::= "for" IDENT "in" Expr ".." Expr Block
 BreakStmt      ::= "break"

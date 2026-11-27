@@ -19,6 +19,13 @@
     ],
     "description": "Declare a PSPScript v0.2 game configuration block"
   },
+  "Compile-Time Constant": {
+    "prefix": "const",
+    "body": [
+      "const ${1:MAX_COUNT} = ${2:32}"
+    ],
+    "description": "Declare a zero-RAM compile-time constant"
+  },
   "Enum Declaration": {
     "prefix": "enum",
     "body": [

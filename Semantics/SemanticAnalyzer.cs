@@ -8,6 +8,8 @@ public sealed class SemanticAnalyzer
     private readonly SymbolTable _symbols = new();
     private readonly SemanticModel _model;
     private readonly List<SemanticDiagnostic> _diagnostics = [];
+    private readonly Dictionary<string, ConstDecl> _pendingConstants = new(StringComparer.Ordinal);
+    private readonly HashSet<string> _evaluatingConstants = new(StringComparer.Ordinal);
     private readonly bool _checkAssetPathsOnDisk;
 
     public SemanticAnalyzer(bool checkAssetPathsOnDisk = false)
@@ -62,10 +64,66 @@ public sealed class SemanticAnalyzer
 
     private void CollectTopLevelDeclarations(ProgramNode program)
     {
+        // Pre-pass A: register enums and pending compile-time constants first so they can be used
+        // in actor pool capacities, fixed array sizes, and other constant initializers in any order.
+        foreach (var decl in program.Declarations)
+        {
+            if (decl is EnumDecl enumDecl)
+            {
+                if (!RegisterUniqueTopLevel(enumDecl.Name, enumDecl))
+                    continue;
+
+                if (enumDecl.Variants.Count == 0)
+                {
+                    ReportError($"Enum '{enumDecl.Name}' must declare at least one variant.", enumDecl.Span);
+                }
+
+                var uniqueVariants = new List<string>(enumDecl.Variants.Count);
+                var seenVariants = new HashSet<string>(StringComparer.Ordinal);
+                foreach (var variant in enumDecl.Variants)
+                {
+                    if (!seenVariants.Add(variant))
+                    {
+                        ReportError($"Duplicate variant '{variant}' in enum '{enumDecl.Name}'.", enumDecl.Span);
+                    }
+                    else
+                    {
+                        uniqueVariants.Add(variant);
+                    }
+                }
+
+                var enumType = new EnumType(enumDecl.Name);
+                _symbols.Enums[enumDecl.Name] = new EnumSymbol(
+                    enumDecl.Name,
+                    enumType,
+                    uniqueVariants,
+                    enumDecl
+                );
+                _model.RecordType(enumDecl, enumType);
+            }
+            else if (decl is ConstDecl constDecl)
+            {
+                if (!RegisterUniqueTopLevel(constDecl.Name, constDecl))
+                    continue;
+
+                _pendingConstants[constDecl.Name] = constDecl;
+            }
+        }
+
+        // Pre-pass B: evaluate all top-level compile-time constants
+        foreach (string constName in _pendingConstants.Keys.ToList())
+        {
+            TryGetOrEvaluateTopLevelConst(constName, out _);
+        }
+
         foreach (var decl in program.Declarations)
         {
             switch (decl)
             {
+                case EnumDecl:
+                case ConstDecl:
+                    break;
+
                 case GameConfigDecl gameConfig:
                     if (_symbols.GameConfig is not null)
                     {
@@ -120,54 +178,44 @@ public sealed class SemanticAnalyzer
                     );
                     break;
 
-                case EnumDecl enumDecl:
-                    if (!RegisterUniqueTopLevel(enumDecl.Name, enumDecl))
-                        break;
-
-                    if (enumDecl.Variants.Count == 0)
-                    {
-                        ReportError($"Enum '{enumDecl.Name}' must declare at least one variant.", enumDecl.Span);
-                    }
-
-                    var uniqueVariants = new List<string>(enumDecl.Variants.Count);
-                    var seenVariants = new HashSet<string>(StringComparer.Ordinal);
-                    foreach (var variant in enumDecl.Variants)
-                    {
-                        if (!seenVariants.Add(variant))
-                        {
-                            ReportError($"Duplicate variant '{variant}' in enum '{enumDecl.Name}'.", enumDecl.Span);
-                        }
-                        else
-                        {
-                            uniqueVariants.Add(variant);
-                        }
-                    }
-
-                    var enumType = new EnumType(enumDecl.Name);
-                    _symbols.Enums[enumDecl.Name] = new EnumSymbol(
-                        enumDecl.Name,
-                        enumType,
-                        uniqueVariants,
-                        enumDecl
-                    );
-                    _model.RecordType(enumDecl, enumType);
-                    break;
-
                 case ActorDecl actor:
                     if (!RegisterUniqueTopLevel(actor.Name, actor))
                         break;
 
-                    if (actor.PoolCapacity is <= 0)
+                    int? resolvedCap = actor.PoolCapacity;
+                    if (actor.PoolCapacityExpr is not null)
+                    {
+                        if (TryEvaluateIntConstant(actor.PoolCapacityExpr, scope: null, out int evalCap))
+                        {
+                            resolvedCap = evalCap;
+                            if (evalCap <= 0)
+                            {
+                                ReportError(
+                                    $"Actor '{actor.Name}' pool capacity must be a positive integer, got {evalCap}.",
+                                    actor.PoolCapacityExpr.Span
+                                );
+                            }
+                        }
+                        else
+                        {
+                            ReportError(
+                                $"Actor '{actor.Name}' pool capacity must be a compile-time constant positive integer.",
+                                actor.PoolCapacityExpr.Span
+                            );
+                            resolvedCap = 1;
+                        }
+                    }
+                    else if (resolvedCap is <= 0)
                     {
                         ReportError(
-                            $"Actor '{actor.Name}' pool capacity must be a positive integer, got {actor.PoolCapacity}.",
+                            $"Actor '{actor.Name}' pool capacity must be a positive integer, got {resolvedCap}.",
                             actor.Span
                         );
                     }
 
                     _symbols.Actors[actor.Name] = new ActorSymbol(
                         actor.Name,
-                        actor.PoolCapacity,
+                        resolvedCap,
                         new Dictionary<string, FieldSymbol>(StringComparer.Ordinal),
                         new Dictionary<LifecycleKind, LifecycleHook>(),
                         new Dictionary<string, MessageHandler>(StringComparer.Ordinal),
@@ -650,9 +698,19 @@ public sealed class SemanticAnalyzer
 
     private ResolvedType ResolveFixedArrayType(FixedArrayTypeRef arrayRef)
     {
-        if (arrayRef.Length <= 0)
+        int resolvedLength = 1;
+        if (TryEvaluateIntConstant(arrayRef.LengthExpr, scope: null, out int evalLen))
         {
-            ReportError($"Fixed array length must be greater than 0, got {arrayRef.Length}.", arrayRef.Span);
+            resolvedLength = evalLen;
+            if (evalLen <= 0)
+            {
+                ReportError($"Fixed array length must be greater than 0, got {evalLen}.", arrayRef.Span);
+                resolvedLength = 1;
+            }
+        }
+        else
+        {
+            ReportError("Fixed array length must be a compile-time constant positive integer.", arrayRef.LengthExpr.Span);
         }
 
         var elementType = ResolveTypeRef(arrayRef.ElementType);
@@ -662,7 +720,7 @@ public sealed class SemanticAnalyzer
             elementType = ResolvedType.Error;
         }
 
-        return new FixedArrayType(arrayRef.Length, elementType);
+        return new FixedArrayType(resolvedLength, elementType);
     }
 
     private void CheckStructCycles()
@@ -1089,6 +1147,10 @@ public sealed class SemanticAnalyzer
                 ValidateLocalVarStmt(localVar, scope);
                 break;
 
+            case LocalConstStmt localConst:
+                ValidateLocalConstStmt(localConst, scope);
+                break;
+
             case AssignStmt assign:
                 ValidateAssignStmt(assign, scope);
                 break;
@@ -1218,6 +1280,65 @@ public sealed class SemanticAnalyzer
         _model.RecordType(localVar, finalType);
     }
 
+    private void ValidateLocalConstStmt(LocalConstStmt localConst, LexicalScope scope)
+    {
+        ResolvedType? explicitType = localConst.ExplicitType is not null
+            ? ResolveTypeRef(localConst.ExplicitType)
+            : null;
+
+        if (explicitType == ResolvedType.Void)
+        {
+            ReportError($"Local constant '{localConst.Name}' cannot have type 'void'.", localConst.Span);
+            explicitType = ResolvedType.Error;
+        }
+
+        ResolvedType finalType = explicitType ?? ResolvedType.Error;
+        ConstValue? constVal = null;
+
+        if (TryEvaluateConstExpr(localConst.Initializer, scope, explicitType, out var evaluated, out var initType))
+        {
+            constVal = evaluated;
+            if (explicitType is not null)
+            {
+                if (!ResolvedType.IsAssignableTo(initType, explicitType))
+                {
+                    ReportError(
+                        $"Cannot initialize local constant '{localConst.Name}' of type '{explicitType}' with value of type '{initType}'.",
+                        localConst.Span
+                    );
+                }
+                finalType = explicitType;
+            }
+            else
+            {
+                finalType = initType;
+            }
+        }
+        else
+        {
+            ReportError(
+                $"Constant '{localConst.Name}' initializer must be a compile-time constant expression.",
+                localConst.Initializer.Span
+            );
+        }
+
+        var varSym = new VariableSymbol(
+            Name: localConst.Name,
+            Scope: MemoryScope.Stack,
+            Type: finalType,
+            IsReadOnly: true,
+            Declaration: localConst,
+            ConstantValue: constVal
+        );
+
+        if (!scope.TryDeclareLocal(varSym))
+        {
+            ReportError($"Constant '{localConst.Name}' is already declared in this scope.", localConst.Span);
+        }
+
+        _model.RecordType(localConst, finalType);
+    }
+
     private void ValidateAssignStmt(AssignStmt assign, LexicalScope scope)
     {
         if (assign.Target is not (IdentifierExpr or FieldAccessExpr or IndexAccessExpr))
@@ -1232,7 +1353,12 @@ public sealed class SemanticAnalyzer
         {
             if (scope.TryLookupLocal(idTarget.Name, out var localSym) && localSym!.IsReadOnly)
             {
-                ReportError($"Cannot assign to read-only binding '{idTarget.Name}'.", assign.Span);
+                string kind = localSym.ConstantValue is not null ? "compile-time constant" : "read-only binding";
+                ReportError($"Cannot assign to {kind} '{idTarget.Name}'.", assign.Span);
+            }
+            else if (_symbols.Constants.ContainsKey(idTarget.Name))
+            {
+                ReportError($"Cannot assign to compile-time constant '{idTarget.Name}'.", assign.Span);
             }
             else if (_symbols.Assets.ContainsKey(idTarget.Name))
             {
@@ -1393,6 +1519,41 @@ public sealed class SemanticAnalyzer
                             arm.Span
                         );
                         break;
+
+                    case ConstPattern constPat:
+                        if (!TryLookupConstValue(constPat.Name, scope, out var enumConstVal, out _))
+                        {
+                            ReportError($"Undeclared compile-time constant '{constPat.Name}' in 'match' pattern.", constPat.Span);
+                        }
+                        else if (enumConstVal is EnumConstValue ecv)
+                        {
+                            if (!string.Equals(ecv.EnumName, enumSym.Name, StringComparison.Ordinal))
+                            {
+                                ReportError(
+                                    $"Constant '{constPat.Name}' ({ecv.EnumName}.{ecv.VariantName}) does not match scrutinee enum type '{enumSym.Name}'.",
+                                    constPat.Span
+                                );
+                            }
+                            else if (!coveredVariants.Add(ecv.VariantName))
+                            {
+                                ReportError(
+                                    $"Duplicate match arm for '{enumSym.Name}.{ecv.VariantName}' (via constant '{constPat.Name}').",
+                                    arm.Span
+                                );
+                            }
+                            else
+                            {
+                                _model.RecordConstPattern(constPat, ecv);
+                            }
+                        }
+                        else
+                        {
+                            ReportError(
+                                $"Constant '{constPat.Name}' cannot be matched against enum type '{enumSym.Name}'.",
+                                constPat.Span
+                            );
+                        }
+                        break;
                 }
 
                 ValidateMatchArmBody(arm.Body, scope);
@@ -1448,6 +1609,35 @@ public sealed class SemanticAnalyzer
                             $"Cannot match enum variant '{variantPat.EnumName}.{variantPat.VariantName}' against integer type '{scrutineeType}'.",
                             arm.Span
                         );
+                        break;
+
+                    case ConstPattern constPat:
+                        if (!TryLookupConstValue(constPat.Name, scope, out var intConstVal, out _))
+                        {
+                            ReportError($"Undeclared compile-time constant '{constPat.Name}' in 'match' pattern.", constPat.Span);
+                        }
+                        else if (intConstVal is IntConstValue icv)
+                        {
+                            int val = (int)icv.Value;
+                            if (!coveredInts.Add(val))
+                            {
+                                ReportError(
+                                    $"Duplicate match arm for integer value '{val}' (via constant '{constPat.Name}').",
+                                    arm.Span
+                                );
+                            }
+                            else
+                            {
+                                _model.RecordConstPattern(constPat, icv);
+                            }
+                        }
+                        else
+                        {
+                            ReportError(
+                                $"Constant '{constPat.Name}' must be an integer constant to match against '{scrutineeType}'.",
+                                constPat.Span
+                            );
+                        }
                         break;
                 }
 
@@ -1927,6 +2117,10 @@ public sealed class SemanticAnalyzer
         {
             return stateField.Type;
         }
+
+        // Compile-time constants
+        if (_symbols.Constants.TryGetValue(idExpr.Name, out var constSym))
+            return constSym.Type;
 
         // Global & level variables
         if (_symbols.Globals.TryGetValue(idExpr.Name, out var globalSym))
@@ -2736,6 +2930,361 @@ public sealed class SemanticAnalyzer
                 arguments[3].Span
             );
         }
+    }
+
+    // ========================================================================
+    // Compile-Time Constant Folding & Evaluation
+    // ========================================================================
+
+    private bool TryGetOrEvaluateTopLevelConst(string name, out ConstSymbol? symbol)
+    {
+        if (_symbols.Constants.TryGetValue(name, out symbol))
+            return true;
+
+        if (!_pendingConstants.TryGetValue(name, out var decl))
+        {
+            symbol = null;
+            return false;
+        }
+
+        if (!_evaluatingConstants.Add(name))
+        {
+            ReportError($"Circular constant definition involving '{name}'.", decl.Span);
+            symbol = null;
+            return false;
+        }
+
+        try
+        {
+            ResolvedType? explicitType = decl.ExplicitType is not null
+                ? ResolveTypeRef(decl.ExplicitType)
+                : null;
+
+            if (explicitType == ResolvedType.Void)
+            {
+                ReportError($"Constant '{decl.Name}' cannot have type 'void'.", decl.Span);
+                explicitType = ResolvedType.Error;
+            }
+
+            if (!TryEvaluateConstExpr(decl.Initializer, scope: null, explicitType, out var evaluated, out var initType) ||
+                evaluated is null)
+            {
+                ReportError(
+                    $"Constant '{decl.Name}' initializer must be a compile-time constant expression.",
+                    decl.Initializer.Span
+                );
+                var errSym = new ConstSymbol(decl.Name, explicitType ?? ResolvedType.Error, new IntConstValue(0), decl);
+                _symbols.Constants[decl.Name] = errSym;
+                _model.RecordType(decl, errSym.Type);
+                symbol = errSym;
+                return false;
+            }
+
+            ResolvedType finalType;
+            if (explicitType is not null)
+            {
+                if (!ResolvedType.IsAssignableTo(initType, explicitType))
+                {
+                    ReportError(
+                        $"Cannot initialize constant '{decl.Name}' of type '{explicitType}' with value of type '{initType}'.",
+                        decl.Span
+                    );
+                }
+                finalType = explicitType;
+            }
+            else
+            {
+                finalType = initType;
+            }
+
+            symbol = new ConstSymbol(decl.Name, finalType, evaluated, decl);
+            _symbols.Constants[decl.Name] = symbol;
+            _model.RecordType(decl, finalType);
+            return true;
+        }
+        finally
+        {
+            _evaluatingConstants.Remove(name);
+            _pendingConstants.Remove(name);
+        }
+    }
+
+    private bool TryLookupConstValue(string name, LexicalScope? scope, out ConstValue? value, out ResolvedType type)
+    {
+        if (scope is not null && scope.TryLookupLocal(name, out var localSym) && localSym!.ConstantValue is not null)
+        {
+            value = localSym.ConstantValue;
+            type = localSym.Type;
+            return true;
+        }
+
+        if (TryGetOrEvaluateTopLevelConst(name, out var constSym) && constSym is not null)
+        {
+            value = constSym.Value;
+            type = constSym.Type;
+            return true;
+        }
+
+        value = null;
+        type = ResolvedType.Error;
+        return false;
+    }
+
+    private bool TryEvaluateIntConstant(Expr expr, LexicalScope? scope, out int value)
+    {
+        if (TryEvaluateConstExpr(expr, scope, ResolvedType.Int, out var cv, out _) && cv is IntConstValue icv)
+        {
+            value = (int)icv.Value;
+            return true;
+        }
+        value = 0;
+        return false;
+    }
+
+    private bool TryEvaluateConstExpr(
+        Expr expr,
+        LexicalScope? scope,
+        ResolvedType? expectedType,
+        out ConstValue? value,
+        out ResolvedType type)
+    {
+        switch (expr)
+        {
+            case IntLiteralExpr il:
+                value = new IntConstValue(il.Value);
+                type = _model.RecordType(expr, ResolvedType.Int);
+                return true;
+
+            case FloatLiteralExpr fl:
+                value = new FloatConstValue(fl.Value);
+                type = _model.RecordType(expr, ResolvedType.F32);
+                return true;
+
+            case TimeLiteralExpr tl:
+                value = new TimeConstValue(tl.Seconds);
+                type = _model.RecordType(expr, ResolvedType.Timer);
+                return true;
+
+            case ColorLiteralExpr cl:
+                value = new ColorConstValue(cl.AbgrValue);
+                type = _model.RecordType(expr, ResolvedType.Color);
+                return true;
+
+            case BooleanLiteralExpr bl:
+                value = new BoolConstValue(bl.Value);
+                type = _model.RecordType(expr, ResolvedType.Bool);
+                return true;
+
+            case StringLiteralExpr sl:
+                value = new StringConstValue(sl.Text);
+                type = _model.RecordType(expr, ResolvedType.String);
+                return true;
+
+            case VecLiteralExpr vl:
+            {
+                var comps = new List<float>(vl.Components.Count);
+                foreach (var c in vl.Components)
+                {
+                    if (!TryEvaluateConstExpr(c, scope, ResolvedType.F32, out var cv, out _))
+                    {
+                        value = null;
+                        type = ResolvedType.Error;
+                        return false;
+                    }
+                    if (cv is IntConstValue ic) comps.Add(ic.Value);
+                    else if (cv is FloatConstValue fc) comps.Add(fc.Value);
+                    else
+                    {
+                        value = null;
+                        type = ResolvedType.Error;
+                        return false;
+                    }
+                }
+                ResolvedType vecType = vl.Components.Count switch
+                {
+                    2 => ResolvedType.Vec2,
+                    3 => ResolvedType.Vec3,
+                    4 => ResolvedType.Rect,
+                    _ => ResolvedType.Error
+                };
+                if (vecType.IsError)
+                {
+                    value = null;
+                    type = ResolvedType.Error;
+                    return false;
+                }
+                value = new VecConstValue(comps);
+                type = _model.RecordType(expr, vecType);
+                return true;
+            }
+
+            case IdentifierExpr id:
+                if (TryLookupConstValue(id.Name, scope, out value, out type))
+                {
+                    _model.RecordType(expr, type);
+                    return true;
+                }
+                return false;
+
+            case FieldAccessExpr { Target: IdentifierExpr enumId } fa when _symbols.Enums.TryGetValue(enumId.Name, out var enumSym):
+            {
+                int ord = enumSym.Variants.ToList().IndexOf(fa.FieldName);
+                if (ord < 0)
+                {
+                    ReportError($"Enum '{enumSym.Name}' does not contain a variant named '{fa.FieldName}'.", fa.Span);
+                    value = null;
+                    type = ResolvedType.Error;
+                    return false;
+                }
+                value = new EnumConstValue(enumSym.Name, fa.FieldName, ord);
+                type = _model.RecordType(expr, enumSym.Type);
+                return true;
+            }
+
+            case UnaryExpr ue:
+                if (!TryEvaluateConstExpr(ue.Operand, scope, expectedType, out var opVal, out var opType))
+                {
+                    value = null;
+                    type = ResolvedType.Error;
+                    return false;
+                }
+                switch (ue.Operator)
+                {
+                    case UnaryOp.Negate when opVal is IntConstValue iv:
+                        value = new IntConstValue(-iv.Value);
+                        type = _model.RecordType(expr, opType);
+                        return true;
+                    case UnaryOp.Negate when opVal is FloatConstValue fv:
+                        value = new FloatConstValue(-fv.Value);
+                        type = _model.RecordType(expr, ResolvedType.F32);
+                        return true;
+                    case UnaryOp.Not when opVal is BoolConstValue bv:
+                        value = new BoolConstValue(!bv.Value);
+                        type = _model.RecordType(expr, ResolvedType.Bool);
+                        return true;
+                    case UnaryOp.BitNot when opVal is IntConstValue biv:
+                        value = new IntConstValue(~biv.Value);
+                        type = _model.RecordType(expr, opType);
+                        return true;
+                    default:
+                        value = null;
+                        type = ResolvedType.Error;
+                        return false;
+                }
+
+            case BinaryExpr be:
+                return TryEvaluateBinaryConst(be, scope, out value, out type);
+
+            default:
+                value = null;
+                type = ResolvedType.Error;
+                return false;
+        }
+    }
+
+    private bool TryEvaluateBinaryConst(
+        BinaryExpr be,
+        LexicalScope? scope,
+        out ConstValue? value,
+        out ResolvedType type)
+    {
+        if (!TryEvaluateConstExpr(be.Left, scope, null, out var lVal, out var lType) ||
+            !TryEvaluateConstExpr(be.Right, scope, null, out var rVal, out var rType))
+        {
+            value = null;
+            type = ResolvedType.Error;
+            return false;
+        }
+
+        // Integer-integer operations
+        if (lVal is IntConstValue li && rVal is IntConstValue ri)
+        {
+            switch (be.Op)
+            {
+                case BinaryOp.Add: value = new IntConstValue(li.Value + ri.Value); type = _model.RecordType(be, ResolvedType.Int); return true;
+                case BinaryOp.Sub: value = new IntConstValue(li.Value - ri.Value); type = _model.RecordType(be, ResolvedType.Int); return true;
+                case BinaryOp.Mul: value = new IntConstValue(li.Value * ri.Value); type = _model.RecordType(be, ResolvedType.Int); return true;
+                case BinaryOp.Div:
+                    if (ri.Value == 0)
+                    {
+                        ReportError("Division by zero in compile-time constant expression.", be.Span);
+                        value = null; type = ResolvedType.Error; return false;
+                    }
+                    value = new IntConstValue(li.Value / ri.Value); type = _model.RecordType(be, ResolvedType.Int); return true;
+                case BinaryOp.Mod:
+                    if (ri.Value == 0)
+                    {
+                        ReportError("Modulo by zero in compile-time constant expression.", be.Span);
+                        value = null; type = ResolvedType.Error; return false;
+                    }
+                    value = new IntConstValue(li.Value % ri.Value); type = _model.RecordType(be, ResolvedType.Int); return true;
+                case BinaryOp.BitAnd: value = new IntConstValue(li.Value & ri.Value); type = _model.RecordType(be, ResolvedType.Int); return true;
+                case BinaryOp.BitOr:  value = new IntConstValue(li.Value | ri.Value); type = _model.RecordType(be, ResolvedType.Int); return true;
+                case BinaryOp.BitXor: value = new IntConstValue(li.Value ^ ri.Value); type = _model.RecordType(be, ResolvedType.Int); return true;
+                case BinaryOp.ShiftLeft:  value = new IntConstValue(li.Value << (int)ri.Value); type = _model.RecordType(be, ResolvedType.Int); return true;
+                case BinaryOp.ShiftRight: value = new IntConstValue(li.Value >> (int)ri.Value); type = _model.RecordType(be, ResolvedType.Int); return true;
+                case BinaryOp.Equal:        value = new BoolConstValue(li.Value == ri.Value); type = _model.RecordType(be, ResolvedType.Bool); return true;
+                case BinaryOp.NotEqual:     value = new BoolConstValue(li.Value != ri.Value); type = _model.RecordType(be, ResolvedType.Bool); return true;
+                case BinaryOp.Less:         value = new BoolConstValue(li.Value < ri.Value);  type = _model.RecordType(be, ResolvedType.Bool); return true;
+                case BinaryOp.LessEqual:    value = new BoolConstValue(li.Value <= ri.Value); type = _model.RecordType(be, ResolvedType.Bool); return true;
+                case BinaryOp.Greater:      value = new BoolConstValue(li.Value > ri.Value);  type = _model.RecordType(be, ResolvedType.Bool); return true;
+                case BinaryOp.GreaterEqual: value = new BoolConstValue(li.Value >= ri.Value); type = _model.RecordType(be, ResolvedType.Bool); return true;
+            }
+        }
+
+        // Float / mixed numeric operations
+        if ((lVal is FloatConstValue or IntConstValue) && (rVal is FloatConstValue or IntConstValue))
+        {
+            float lf = lVal is FloatConstValue lfc ? lfc.Value : ((IntConstValue)lVal).Value;
+            float rf = rVal is FloatConstValue rfc ? rfc.Value : ((IntConstValue)rVal).Value;
+            switch (be.Op)
+            {
+                case BinaryOp.Add: value = new FloatConstValue(lf + rf); type = _model.RecordType(be, ResolvedType.F32); return true;
+                case BinaryOp.Sub: value = new FloatConstValue(lf - rf); type = _model.RecordType(be, ResolvedType.F32); return true;
+                case BinaryOp.Mul: value = new FloatConstValue(lf * rf); type = _model.RecordType(be, ResolvedType.F32); return true;
+                case BinaryOp.Div:
+                    if (rf == 0.0f)
+                    {
+                        ReportError("Division by zero in compile-time constant expression.", be.Span);
+                        value = null; type = ResolvedType.Error; return false;
+                    }
+                    value = new FloatConstValue(lf / rf); type = _model.RecordType(be, ResolvedType.F32); return true;
+                case BinaryOp.Equal:        value = new BoolConstValue(lf == rf); type = _model.RecordType(be, ResolvedType.Bool); return true;
+                case BinaryOp.NotEqual:     value = new BoolConstValue(lf != rf); type = _model.RecordType(be, ResolvedType.Bool); return true;
+                case BinaryOp.Less:         value = new BoolConstValue(lf < rf);  type = _model.RecordType(be, ResolvedType.Bool); return true;
+                case BinaryOp.LessEqual:    value = new BoolConstValue(lf <= rf); type = _model.RecordType(be, ResolvedType.Bool); return true;
+                case BinaryOp.Greater:      value = new BoolConstValue(lf > rf);  type = _model.RecordType(be, ResolvedType.Bool); return true;
+                case BinaryOp.GreaterEqual: value = new BoolConstValue(lf >= rf); type = _model.RecordType(be, ResolvedType.Bool); return true;
+            }
+        }
+
+        // Boolean operations
+        if (lVal is BoolConstValue lb && rVal is BoolConstValue rb)
+        {
+            switch (be.Op)
+            {
+                case BinaryOp.LogicalAnd: value = new BoolConstValue(lb.Value && rb.Value); type = _model.RecordType(be, ResolvedType.Bool); return true;
+                case BinaryOp.LogicalOr:  value = new BoolConstValue(lb.Value || rb.Value); type = _model.RecordType(be, ResolvedType.Bool); return true;
+                case BinaryOp.Equal:      value = new BoolConstValue(lb.Value == rb.Value); type = _model.RecordType(be, ResolvedType.Bool); return true;
+                case BinaryOp.NotEqual:   value = new BoolConstValue(lb.Value != rb.Value); type = _model.RecordType(be, ResolvedType.Bool); return true;
+            }
+        }
+
+        // Enum equality
+        if (lVal is EnumConstValue le && rVal is EnumConstValue re && string.Equals(le.EnumName, re.EnumName, StringComparison.Ordinal))
+        {
+            switch (be.Op)
+            {
+                case BinaryOp.Equal:    value = new BoolConstValue(le.Ordinal == re.Ordinal); type = _model.RecordType(be, ResolvedType.Bool); return true;
+                case BinaryOp.NotEqual: value = new BoolConstValue(le.Ordinal != re.Ordinal); type = _model.RecordType(be, ResolvedType.Bool); return true;
+            }
+        }
+
+        _ = lType;
+        _ = rType;
+        value = null;
+        type = ResolvedType.Error;
+        return false;
     }
 
     // ========================================================================

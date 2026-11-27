@@ -35,6 +35,7 @@ public static class LspCompletionProvider
     private const int KindEnum = 13;
     private const int KindKeyword = 14;
     private const int KindEnumMember = 20;
+    private const int KindConstant = 21;
     private const int KindStruct = 22;
     private const int KindTypeParameter = 25;
 
@@ -54,7 +55,7 @@ public static class LspCompletionProvider
 
     private static readonly string[] LanguageKeywords =
     [
-        "import", "game", "asset", "message", "struct", "enum", "actor", "state",
+        "import", "game", "asset", "const", "message", "struct", "enum", "actor", "state",
         "global", "level", "temp", "var", "fn",
         "init", "update", "draw", "exit", "on",
         "if", "else", "match", "for", "each", "in", "break", "return",
@@ -344,6 +345,10 @@ public static class LspCompletionProvider
                 string mut = assetSym.IsMutable ? ", mutable: true" : string.Empty;
                 return $"```pspscript\nasset {assetSym.Name} = {assetSym.AssetKind}(\"{assetSym.FilePath}\"{mut})\n```";
             }
+            if (symbols.Constants.TryGetValue(word, out var constSym))
+            {
+                return $"```pspscript\nconst {constSym.Name}: {constSym.Type} = {constSym.Value.FormatDisplay()}\n```";
+            }
             if (symbols.Globals.TryGetValue(word, out var gSym))
             {
                 string scopeKw = gSym.Scope == MemoryScope.LevelArena ? "level var" : "global var";
@@ -501,6 +506,8 @@ public static class LspCompletionProvider
                 return MakeLocationFromSpan(msgSym.Declaration.Span, documentUri);
             if (symbols.Assets.TryGetValue(word, out var assetSym))
                 return MakeLocationFromSpan(assetSym.Declaration.Span, documentUri);
+            if (symbols.Constants.TryGetValue(word, out var constSym))
+                return MakeLocationFromSpan(constSym.Declaration.Span, documentUri);
             if (symbols.Globals.TryGetValue(word, out var globalSym) && globalSym.Declaration is not null)
                 return MakeLocationFromSpan(globalSym.Declaration.Span, documentUri);
             if (symbols.Functions.TryGetValue(word, out var fnSym) && fnSym.Declaration is not null)
@@ -647,6 +654,13 @@ public static class LspCompletionProvider
                     result.Add(MakeDocSymbol(asset.Name, $"asset<{asset.AssetKind}>", SymConstant, asset.Span));
                     break;
 
+                case ConstDecl constDecl:
+                    string constDetail = constDecl.ExplicitType is not null
+                        ? $"const {FormatTypeRef(constDecl.ExplicitType)}"
+                        : "const";
+                    result.Add(MakeDocSymbol(constDecl.Name, constDetail, SymConstant, constDecl.Span));
+                    break;
+
                 case EnumDecl en:
                     var variants = en.Variants
                         .Select((v, idx) => MakeDocSymbol(v, $"= {idx}", SymEnumMember, en.Span))
@@ -747,7 +761,11 @@ public static class LspCompletionProvider
         BuiltinTypeRef b => b.Name,
         NamedTypeRef n => n.Name,
         ActorRefTypeRef a => $"ref<{a.ActorName}>",
-        FixedArrayTypeRef f => $"[{f.Length}]{FormatTypeRef(f.ElementType)}",
+        FixedArrayTypeRef f => f.LengthExpr is IntLiteralExpr il
+            ? $"[{il.Value}]{FormatTypeRef(f.ElementType)}"
+            : f.LengthExpr is IdentifierExpr id
+                ? $"[{id.Name}]{FormatTypeRef(f.ElementType)}"
+                : $"[...]{FormatTypeRef(f.ElementType)}",
         _ => "any"
     };
 
@@ -1245,6 +1263,9 @@ public static class LspCompletionProvider
             AddUnique(new LspCompletionItem(fn.Name, KindFunction, $"fn({p}) -> {fn.ReturnType}"));
         }
 
+        foreach (var c in effectiveSymbols.Constants.Values)
+            AddUnique(new LspCompletionItem(c.Name, KindConstant, $"const {c.Type} = {c.Value.FormatDisplay()}"));
+
         foreach (var g in effectiveSymbols.Globals.Values)
             AddUnique(new LspCompletionItem(g.Name, KindVariable, $"{g.Scope} {g.Type}"));
 
@@ -1479,6 +1500,7 @@ public static class LspCompletionProvider
         var patterns = new[]
         {
             $@"\b(?:temp\s+)?var\s+({Regex.Escape(word)})\b",
+            $@"\bconst\s+({Regex.Escape(word)})\b",
             $@"\b(?:for|each)\s+({Regex.Escape(word)})\s+in\b",
             $@"\bon\s+[A-Za-z_][A-Za-z0-9_]*\s*\(\s*({Regex.Escape(word)})\s*\)",
             $@"\b({Regex.Escape(word)})\s*:\s*(?:ref<|[A-Za-z_\[])"

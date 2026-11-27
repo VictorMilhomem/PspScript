@@ -159,7 +159,20 @@ public sealed partial class CCodeGenerator
 
     private void EmitStructsAssetsAndGlobals()
     {
-        _writer.WriteSectionHeader("Passive Structs, Baked Assets & Global Variables");
+        _writer.WriteSectionHeader("Passive Structs, Compile-Time Constants, Baked Assets & Global Variables");
+
+        if (_symbols.Constants.Count > 0)
+        {
+            foreach (var cSym in _symbols.Constants.Values)
+            {
+                string cInit = FormatConstValueC(cSym.Type, cSym.Value);
+                string declLine = cSym.Type == ResolvedType.String
+                    ? $"static const char* const g_const_{cSym.Name} = {cInit};"
+                    : $"static const {CTypeMapper.FormatCType(cSym.Type)} g_const_{cSym.Name} = {cInit};";
+                _writer.WriteLine(declLine);
+            }
+            _writer.WriteLine();
+        }
 
         foreach (var st in _symbols.Structs.Values)
         {

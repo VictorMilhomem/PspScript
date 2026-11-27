@@ -306,6 +306,34 @@ enum Season {
 global var current_season: Season = Season.Spring
 ```
 
+### Compile-Time Constants (`const`)
+
+Declare immutable, zero-RAM constants at **top-level** or **local** scope with `const NAME[: type] = expr`. Constant expressions are evaluated at compile time and can be used in expressions, fixed array sizes (`[N]T`), actor pool capacities (`actor Enemy[N]`), and `match` patterns:
+
+```pspscript
+const MAX_ENEMIES = 16
+const MAP_W = 20
+const MAP_H = 12
+const GRAVITY: f32 = 420.0
+const HUD_GOLD = #FFF275
+
+actor Enemy[MAX_ENEMIES] {
+    pos: vec2 = { 0.0, 0.0 }
+}
+
+state Play {
+    tiles: [MAP_W * MAP_H]u8
+
+    update(dt: f32) {
+        const HALF_G = GRAVITY * 0.5
+        match button_code {
+            BTN_UP => ...,
+            _ => {}
+        }
+    }
+}
+```
+
 ### Compile-Time Assets (`asset`)
 
 Assets declare PNG textures or spritesheets that are decoded at **compile time** by `AssetBaker.cs` and embedded directly into static C99 pixel arrays—requiring zero runtime file I/O or heap allocation on PSP:
@@ -587,7 +615,7 @@ Provides all PSP button bitmask constants (`BTN_CROSS`, `BTN_CIRCLE`, `BTN_SQUAR
 
 | Symbol | Type / Signature | Description |
 | :--- | :--- | :--- |
-| `BTN_*` | `global var ...: int` | PSP controller button bitmasks matching `Runtime/psps_input.h` |
+| `BTN_*` | `const ...: int` | Compile-time PSP controller button bitmasks matching `Runtime/psps_input.h` (zero RAM, usable in `match`) |
 | `dpad_vector` | `() -> vec2` | Returns unnormalized directional vector (`-1.0..1.0` per axis) from held D-Pad buttons |
 
 ```pspscript

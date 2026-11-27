@@ -202,8 +202,8 @@ Reload VS Code (`Ctrl+Shift+P` → `Developer: Reload Window`) to activate highl
 * [x] Self-Contained Single-File Global Installer (`install.sh` bundling the `.NET 10` runtime)
 * [x] Automated Unit Test Suite (`tests/PspScript.Tests`)
 
-### v0.3 (Planned)
-* [ ] Compile-Time Constants (`const NAME[: type] = expr`, usable in expressions, array/pool sizes, and `match` patterns)
+### v0.3 (In Progress)
+* [x] Compile-Time Constants (`const NAME[: type] = expr`, usable in expressions, array/pool sizes, and `match` patterns)
 * [ ] Ternary Conditional Expression (`cond ? a : b`)
 * [ ] Loop Ergonomics (`continue` statement & inclusive ranges `0..=10`)
 * [ ] Field Type Inference & Typed Game Constructors (`vec2(x, y)`, `vec3(x, y, z)`, `rect(x, y, w, h)`)

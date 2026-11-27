@@ -64,6 +64,9 @@ public sealed partial class CCodeGenerator
         if (ctx.CurrentState is not null && ctx.CurrentState.Fields.ContainsKey(name))
             return $"self->{name}";
 
+        if (_symbols.Constants.ContainsKey(name))
+            return $"g_const_{name}";
+
         if (_symbols.Assets.ContainsKey(name))
             return $"g_asset_{name}";
 
@@ -455,6 +458,30 @@ public sealed partial class CCodeGenerator
                 $"printf(\"%s\\n\", {emitted[0]})",
 
             _ => $"/* intrinsic {name} */ (void)0"
+        };
+    }
+
+    private static string FormatConstValueC(ResolvedType type, ConstValue value)
+    {
+        return value switch
+        {
+            IntConstValue iv => type == ResolvedType.F32
+                ? CSourceWriter.FormatFloat(iv.Value)
+                : $"({CTypeMapper.FormatCType(type)}){iv.Value.ToString(CultureInfo.InvariantCulture)}",
+            FloatConstValue fv => CSourceWriter.FormatFloat(fv.Value),
+            BoolConstValue bv => bv.Value ? "true" : "false",
+            ColorConstValue cv => CSourceWriter.FormatColor(cv.AbgrValue),
+            TimeConstValue tv => $"{{ .remaining = {CSourceWriter.FormatFloat(tv.Seconds)}, .duration = {CSourceWriter.FormatFloat(tv.Seconds)} }}",
+            StringConstValue sv => $"\"{CTypeMapper.EscapeCString(sv.Value)}\"",
+            EnumConstValue ev => $"{ev.EnumName}_{ev.VariantName}",
+            VecConstValue vv => vv.Components.Count switch
+            {
+                2 => $"{{ .x = {CSourceWriter.FormatFloat(vv.Components[0])}, .y = {CSourceWriter.FormatFloat(vv.Components[1])} }}",
+                3 => $"{{ .x = {CSourceWriter.FormatFloat(vv.Components[0])}, .y = {CSourceWriter.FormatFloat(vv.Components[1])}, .z = {CSourceWriter.FormatFloat(vv.Components[2])} }}",
+                4 => $"{{ .x = {CSourceWriter.FormatFloat(vv.Components[0])}, .y = {CSourceWriter.FormatFloat(vv.Components[1])}, .w = {CSourceWriter.FormatFloat(vv.Components[2])}, .h = {CSourceWriter.FormatFloat(vv.Components[3])} }}",
+                _ => "{ 0 }"
+            },
+            _ => "0"
         };
     }
 

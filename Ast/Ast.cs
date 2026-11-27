@@ -56,11 +56,12 @@ public record EnumDecl(
 
 public record ActorDecl(
     string Name,
-    int? PoolCapacity, // null = singleton actor; non-null = static pool
+    int? PoolCapacity, // null = singleton actor or evaluated from PoolCapacityExpr
     IReadOnlyList<FieldDecl> Fields,
     IReadOnlyList<LifecycleHook> Hooks,
     IReadOnlyList<MessageHandler> Handlers,
-    IReadOnlyList<FuncDecl> Methods
+    IReadOnlyList<FuncDecl> Methods,
+    Expr? PoolCapacityExpr = null
 ): TopDecl;
 
 public record StateDecl(
@@ -69,6 +70,12 @@ public record StateDecl(
     IReadOnlyList<LifecycleHook> Hooks,
     IReadOnlyList<MessageHandler> Handlers,
     IReadOnlyList<FuncDecl> Methods
+): TopDecl;
+
+public record ConstDecl(
+    string Name,
+    TypeRef? ExplicitType,
+    Expr Initializer
 ): TopDecl;
 
 public record GlobalVarDecl(
@@ -146,9 +153,9 @@ public record NamedTypeRef(string Name) : TypeRef;
 public record ActorRefTypeRef(string ActorName) : TypeRef;
 
 /// <summary>
-/// Fixed-capacity static array: [32]Bullet
+/// Fixed-capacity static array: [32]Bullet or [MAX_TILES]u8
 /// </summary>
-public record FixedArrayTypeRef(int Length, TypeRef ElementType) : TypeRef;
+public record FixedArrayTypeRef(Expr LengthExpr, TypeRef ElementType) : TypeRef;
 
 // ============================================================================
 // Statements (Imperative & Actor Event Flow)
@@ -163,6 +170,12 @@ public record LocalVarStmt(
     string Name,
     TypeRef? ExplicitType,
     Expr? Initializer
+): Stmt;
+
+public record LocalConstStmt(
+    string Name,
+    TypeRef? ExplicitType,
+    Expr Initializer
 ): Stmt;
 
 public record AssignStmt(
@@ -204,6 +217,7 @@ public record MatchArm(
 public abstract record MatchPattern : AstNode;
 public record EnumVariantPattern(string EnumName, string VariantName) : MatchPattern;
 public record IntLiteralPattern(int Value) : MatchPattern;
+public record ConstPattern(string Name) : MatchPattern;
 public record WildcardPattern() : MatchPattern;
 
 /// <summary>

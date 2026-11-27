@@ -32,6 +32,10 @@ public sealed partial class CCodeGenerator
                 EmitLocalVarStmt(localVar, ctx);
                 break;
 
+            case LocalConstStmt localConst:
+                EmitLocalConstStmt(localConst, ctx);
+                break;
+
             case AssignStmt assign:
                 EmitAssignStmt(assign, ctx);
                 break;
@@ -93,6 +97,25 @@ public sealed partial class CCodeGenerator
                 _writer.WriteLine($"{EmitExpr(exprStmt.Expression, ctx)};");
                 break;
         }
+    }
+
+    private void EmitLocalConstStmt(LocalConstStmt localConst, EmissionContext ctx)
+    {
+        var type = _model.GetTypeOrDefault(localConst);
+        string initExpr = EmitExpr(localConst.Initializer, ctx);
+        if (type == ResolvedType.Timer)
+        {
+            _writer.WriteLine($"const psps_timer_t {localConst.Name} = psps_timer_make((float)({initExpr}));");
+        }
+        else if (type == ResolvedType.String)
+        {
+            _writer.WriteLine($"const char* const {localConst.Name} = {initExpr};");
+        }
+        else
+        {
+            _writer.WriteLine($"const {CTypeMapper.FormatCType(type)} {localConst.Name} = {initExpr};");
+        }
+        ctx.LocalVariables.Add(localConst.Name);
     }
 
     private void EmitLocalVarStmt(LocalVarStmt localVar, EmissionContext ctx)
@@ -208,6 +231,12 @@ public sealed partial class CCodeGenerator
             {
                 EnumVariantPattern ev => $"case {ev.EnumName}_{ev.VariantName}:",
                 IntLiteralPattern il => $"case {il.Value}:",
+                ConstPattern cp when _model.ResolvedConstPatterns.TryGetValue(cp, out var cv) => cv switch
+                {
+                    IntConstValue icv => $"case {icv.Value}:",
+                    EnumConstValue ecv => $"case {ecv.EnumName}_{ecv.VariantName}:",
+                    _ => "default:"
+                },
                 WildcardPattern => "default:",
                 _ => "default:"
             };

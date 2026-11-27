@@ -2,6 +2,59 @@ using PspScript.Ast;
 
 namespace PspScript.Semantics;
 
+public abstract record ConstValue
+{
+    public abstract string FormatDisplay();
+}
+
+public sealed record IntConstValue(long Value) : ConstValue
+{
+    public override string FormatDisplay() => Value.ToString(System.Globalization.CultureInfo.InvariantCulture);
+}
+
+public sealed record FloatConstValue(float Value) : ConstValue
+{
+    public override string FormatDisplay() => Value.ToString("0.0###", System.Globalization.CultureInfo.InvariantCulture);
+}
+
+public sealed record BoolConstValue(bool Value) : ConstValue
+{
+    public override string FormatDisplay() => Value ? "true" : "false";
+}
+
+public sealed record ColorConstValue(uint AbgrValue) : ConstValue
+{
+    public override string FormatDisplay() => $"0x{AbgrValue:X8}";
+}
+
+public sealed record TimeConstValue(float Seconds) : ConstValue
+{
+    public override string FormatDisplay() => $"{Seconds.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture)}s";
+}
+
+public sealed record StringConstValue(string Value) : ConstValue
+{
+    public override string FormatDisplay() => $"\"{Value}\"";
+}
+
+public sealed record EnumConstValue(string EnumName, string VariantName, int Ordinal) : ConstValue
+{
+    public override string FormatDisplay() => $"{EnumName}.{VariantName}";
+}
+
+public sealed record VecConstValue(IReadOnlyList<float> Components) : ConstValue
+{
+    public override string FormatDisplay() =>
+        $"{{ {string.Join(", ", Components.Select(static c => c.ToString("0.0###", System.Globalization.CultureInfo.InvariantCulture)))} }}";
+}
+
+public sealed record ConstSymbol(
+    string Name,
+    ResolvedType Type,
+    ConstValue Value,
+    AstNode Declaration
+);
+
 public sealed record AssetSymbol(
     string Name,
     string AssetKind,
@@ -91,19 +144,22 @@ public sealed class VariableSymbol
     public ResolvedType Type { get; set; }
     public bool IsReadOnly { get; }
     public AstNode? Declaration { get; }
+    public ConstValue? ConstantValue { get; }
 
     public VariableSymbol(
         string Name,
         MemoryScope Scope,
         ResolvedType Type,
         bool IsReadOnly = false,
-        AstNode? Declaration = null)
+        AstNode? Declaration = null,
+        ConstValue? ConstantValue = null)
     {
         this.Name = Name;
         this.Scope = Scope;
         this.Type = Type;
         this.IsReadOnly = IsReadOnly;
         this.Declaration = Declaration;
+        this.ConstantValue = ConstantValue;
     }
 }
 
@@ -169,6 +225,7 @@ public sealed class SymbolTable
     public string? BackgroundPath { get; set; }
     public string? OverlayPath { get; set; }
 
+    public Dictionary<string, ConstSymbol> Constants { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, AssetSymbol> Assets { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, MessageSymbol> Messages { get; } = new(StringComparer.Ordinal);
     public Dictionary<string, StructSymbol> Structs { get; } = new(StringComparer.Ordinal);

@@ -1,17 +1,17 @@
 // StdLib/input.psps
 
-global var BTN_CROSS: int = 1
-global var BTN_CIRCLE: int = 2
-global var BTN_SQUARE: int = 4
-global var BTN_TRIANGLE: int = 8
-global var BTN_UP: int = 16
-global var BTN_DOWN: int = 32
-global var BTN_LEFT: int = 64
-global var BTN_RIGHT: int = 128
-global var BTN_L: int = 256
-global var BTN_R: int = 512
-global var BTN_START: int = 1024
-global var BTN_SELECT: int = 2048
+const BTN_CROSS    = 1
+const BTN_CIRCLE   = 2
+const BTN_SQUARE   = 4
+const BTN_TRIANGLE = 8
+const BTN_UP       = 16
+const BTN_DOWN     = 32
+const BTN_LEFT     = 64
+const BTN_RIGHT    = 128
+const BTN_L        = 256
+const BTN_R        = 512
+const BTN_START    = 1024
+const BTN_SELECT   = 2048
 
 fn dpad_vector() -> vec2 {
     var dir: vec2 = { 0.0, 0.0 }

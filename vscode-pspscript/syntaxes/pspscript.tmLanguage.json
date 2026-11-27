@@ -79,6 +79,13 @@
           }
         },
         {
+          "match": "\\b(const)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "storage.modifier.const.pspscript" },
+            "2": { "name": "variable.other.constant.pspscript" }
+          }
+        },
+        {
           "match": "\\b(game)\\b",
           "name": "storage.type.game.pspscript"
         },
@@ -170,7 +177,7 @@
       "patterns": [
         {
           "name": "storage.type.declaration.pspscript",
-          "match": "\\b(actor|state|message|struct|enum|fn|asset)\\b"
+          "match": "\\b(actor|state|message|struct|enum|fn|asset|const)\\b"
         },
         {
           "name": "storage.modifier.memory.pspscript",

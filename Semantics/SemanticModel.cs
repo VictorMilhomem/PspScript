@@ -26,9 +26,11 @@ public sealed record SemanticDiagnostic(
 public sealed class SemanticModel
 {
     private readonly Dictionary<AstNode, ResolvedType> _nodeTypes = new(ReferenceEqualityComparer.Instance);
+    private readonly Dictionary<ConstPattern, ConstValue> _resolvedConstPatterns = new(ReferenceEqualityComparer.Instance);
 
     public SymbolTable Symbols { get; }
     public IReadOnlyDictionary<AstNode, ResolvedType> NodeTypes => _nodeTypes;
+    public IReadOnlyDictionary<ConstPattern, ConstValue> ResolvedConstPatterns => _resolvedConstPatterns;
     public long EstimatedStaticMemoryBytes { get; internal set; }
     public long? ConfiguredRamBudgetBytes => Symbols.ConfiguredRamBudgetBytes;
 
@@ -41,6 +43,11 @@ public sealed class SemanticModel
     {
         _nodeTypes[node] = type;
         return type;
+    }
+
+    internal void RecordConstPattern(ConstPattern pattern, ConstValue value)
+    {
+        _resolvedConstPatterns[pattern] = value;
     }
 
     public bool TryGetType(AstNode node, out ResolvedType? type) =>

@@ -13,7 +13,7 @@ public static class PspParser
     private static readonly HashSet<string> Keywords = new(StringComparer.Ordinal)
     {
         "import", "game", "asset", "message", "struct", "enum", "actor", "state",
-        "global", "level", "temp", "var", "fn",
+        "const", "global", "level", "temp", "var", "fn",
         "init", "update", "draw", "exit", "on",
         "int", "u8", "u16", "u32", "f32", "bool", "void",
         "vec2", "vec3", "rect", "color", "timer", "ref",
@@ -74,6 +74,7 @@ public static class PspParser
             ActorDecl act => act with
             {
                 Span = span,
+                PoolCapacityExpr = act.PoolCapacityExpr is not null ? (Expr)StampNode(act.PoolCapacityExpr, filePath) : null,
                 Fields = act.Fields.Select(f => (FieldDecl)StampNode(f, filePath)).ToList(),
                 Hooks = act.Hooks.Select(h => (LifecycleHook)StampNode(h, filePath)).ToList(),
                 Handlers = act.Handlers.Select(h => (MessageHandler)StampNode(h, filePath)).ToList(),
@@ -86,6 +87,12 @@ public static class PspParser
                 Hooks = st.Hooks.Select(h => (LifecycleHook)StampNode(h, filePath)).ToList(),
                 Handlers = st.Handlers.Select(h => (MessageHandler)StampNode(h, filePath)).ToList(),
                 Methods = st.Methods.Select(fn => (FuncDecl)StampNode(fn, filePath)).ToList()
+            },
+            ConstDecl cd => cd with
+            {
+                Span = span,
+                ExplicitType = cd.ExplicitType is not null ? (TypeRef)StampNode(cd.ExplicitType, filePath) : null,
+                Initializer = (Expr)StampNode(cd.Initializer, filePath)
             },
             GlobalVarDecl g => g with
             {
@@ -130,6 +137,7 @@ public static class PspParser
             FixedArrayTypeRef fa => fa with
             {
                 Span = span,
+                LengthExpr = (Expr)StampNode(fa.LengthExpr, filePath),
                 ElementType = (TypeRef)StampNode(fa.ElementType, filePath)
             },
             BlockStmt blk => blk with
@@ -142,6 +150,12 @@ public static class PspParser
                 Span = span,
                 ExplicitType = lv.ExplicitType is not null ? (TypeRef)StampNode(lv.ExplicitType, filePath) : null,
                 Initializer = lv.Initializer is not null ? (Expr)StampNode(lv.Initializer, filePath) : null
+            },
+            LocalConstStmt lc => lc with
+            {
+                Span = span,
+                ExplicitType = lc.ExplicitType is not null ? (TypeRef)StampNode(lc.ExplicitType, filePath) : null,
+                Initializer = (Expr)StampNode(lc.Initializer, filePath)
             },
             AssignStmt asg => asg with
             {
@@ -327,6 +341,7 @@ public static class PspParser
         // Type System (TypeRef)
         // ====================================================================
 
+        var expr = Deferred<Expr>();
         var typeRef = Deferred<TypeRef>();
 
         // ref<Enemy>
@@ -336,10 +351,10 @@ public static class PspParser
             .AndSkip(Terms.Char('>').ElseError("Expected '>' closing ref type"))
             .Then<TypeRef>(static (context, actorName) => new ActorRefTypeRef(actorName));
 
-        // [32]Bullet
+        // [32]Bullet or [MAX_TILES]u8
         var fixedArrayType = Between(
                 Terms.Char('['),
-                intLiteral.ElseError("Expected constant integer capacity inside '[...]'"),
+                expr.ElseError("Expected constant integer expression inside '[...]'"),
                 Terms.Char(']').ElseError("Expected ']' closing fixed array length")
             )
             .And(typeRef)
@@ -356,8 +371,6 @@ public static class PspParser
         // ====================================================================
         // Expressions & PSP Literals
         // ====================================================================
-
-        var expr = Deferred<Expr>();
 
         // #RRGGBB or #RRGGBBAA -> packed into PSP native ABGR8888 uint
         var hexColorExpr = Terms.Char('#')
@@ -607,6 +620,17 @@ public static class PspParser
                 Initializer: x.Item4
             ));
 
+        var localConstStmt = Keyword("const")
+            .SkipAnd(identifier.ElseError("Expected constant name after 'const'"))
+            .And(optionalTypeAnnotation)
+            .AndSkip(Terms.Char('=').ElseError("Expected '=' in constant declaration"))
+            .And(expr)
+            .Then<Stmt>(static (context, x) => new LocalConstStmt(
+                Name: x.Item1,
+                ExplicitType: x.Item2,
+                Initializer: x.Item3
+            ));
+
         // if cond { ... } else { ... }
         var ifStmt = Deferred<IfStmt>();
         ifStmt.Parser = Keyword("if")
@@ -633,7 +657,10 @@ public static class PspParser
             .And(intLiteral)
             .Then<MatchPattern>(static (context, x) => new IntLiteralPattern(x.Item1 ? -x.Item2 : x.Item2));
 
-        var matchPattern = WithSpan(OneOf(wildcardPattern, enumVariantPattern, signedIntPattern));
+        var constPattern = identifier
+            .Then<MatchPattern>(static (context, name) => new ConstPattern(name));
+
+        var matchPattern = WithSpan(OneOf(wildcardPattern, enumVariantPattern, signedIntPattern, constPattern));
 
         var matchArm = WithSpan(matchPattern
             .AndSkip(Terms.Text("=>").ElseError("Expected '=>' after match pattern"))
@@ -751,6 +778,7 @@ public static class PspParser
 
         stmt.Parser = WithSpan(OneOf(
             spawnWithBinding,
+            localConstStmt,
             localVarStmt,
             ifStmt.Then<Stmt>(static (context, i) => i),
             matchStmt,
@@ -901,10 +929,10 @@ public static class PspParser
             fieldDecl.Then<object>(static (context, f) => f)
         );
 
-        var poolCapacity = Between(Terms.Char('['), intLiteral, Terms.Char(']'))
-            .ThenElse<int?>(static (context, cap) => cap, null);
+        var poolCapacity = Between(Terms.Char('['), expr, Terms.Char(']').ElseError("Expected ']' closing actor pool capacity"))
+            .ThenElse<Expr?>(static (context, cap) => cap, null);
 
-        // Actor: actor Enemy[32] { ... }
+        // Actor: actor Enemy[32] { ... } or actor Enemy[MAX_ENEMIES] { ... }
         var actorDecl = Keyword("actor")
             .SkipAnd(identifier.ElseError("Expected actor name after 'actor'"))
             .And(poolCapacity)
@@ -916,13 +944,15 @@ public static class PspParser
             .Then<TopDecl>(static (context, x) =>
             {
                 var members = x.Item3;
+                int? literalCap = x.Item2 is IntLiteralExpr il ? il.Value : null;
                 return new ActorDecl(
                     Name: x.Item1,
-                    PoolCapacity: x.Item2,
+                    PoolCapacity: literalCap,
                     Fields: members.OfType<FieldDecl>().ToList(),
                     Hooks: members.OfType<LifecycleHook>().ToList(),
                     Handlers: members.OfType<MessageHandler>().ToList(),
-                    Methods: members.OfType<FuncDecl>().ToList()
+                    Methods: members.OfType<FuncDecl>().ToList(),
+                    PoolCapacityExpr: x.Item2
                 );
             });
 
@@ -945,6 +975,18 @@ public static class PspParser
                     Methods: members.OfType<FuncDecl>().ToList()
                 );
             });
+
+        // Top-level compile-time constant: const MAX_ENEMIES = 32
+        var constDecl = Keyword("const")
+            .SkipAnd(identifier.ElseError("Expected constant name after 'const'"))
+            .And(optionalTypeAnnotation)
+            .AndSkip(Terms.Char('=').ElseError("Expected '=' in constant declaration"))
+            .And(expr)
+            .Then<TopDecl>(static (context, x) => new ConstDecl(
+                Name: x.Item1,
+                ExplicitType: x.Item2,
+                Initializer: x.Item3
+            ));
 
         // Global / Level variable: level var score: int = 0
         var globalVarScope = OneOf(
@@ -976,6 +1018,7 @@ public static class PspParser
             importDecl,
             gameConfigDecl,
             assetDecl,
+            constDecl,
             messageDecl,
             structDecl,
             enumDecl,
